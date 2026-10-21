@@ -29,6 +29,7 @@ describe('producesAiGeneratedOutput', () => {
     // AI-generated would be false.
     expect(producesAiGeneratedOutput({ only_need_context: true })).toBe(false)
     expect(producesAiGeneratedOutput({ only_need_prompt: true })).toBe(false)
+    expect(producesAiGeneratedOutput({ structured_context: true })).toBe(false)
   })
 
   test('bypass mode answers are model-written whatever the switches say', () => {
@@ -43,6 +44,7 @@ describe('producesAiGeneratedOutput', () => {
       producesAiGeneratedOutput({ mode: 'bypass', only_need_prompt: true })
     ).toBe(true)
     expect(producesAiGeneratedOutput({ mode: 'bypass' })).toBe(true)
+    expect(producesAiGeneratedOutput({ mode: 'bypass', structured_context: true })).toBe(true)
   })
 })
 

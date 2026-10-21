@@ -37,7 +37,7 @@ export function serializeQueryRequest(
       ? BYPASS_DEFAULT_HISTORY_TURNS
       : configuredHistoryTurns
 
-  const request: QueryRequest = {
+  const request = {
     ...querySettings,
     query,
     response_type: 'Multiple Paragraphs',
@@ -53,5 +53,6 @@ export function serializeQueryRequest(
   }
 
   delete request.history_turns
+  delete request.structured_context
   return request
 }

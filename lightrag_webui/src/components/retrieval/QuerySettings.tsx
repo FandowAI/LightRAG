@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { QueryMode, QueryRequest } from '@/api/lightrag'
+import { QueryMode } from '@/api/lightrag'
 // Removed unused import for Text component
 import Checkbox from '@/components/ui/Checkbox'
 import Input from '@/components/ui/Input'
@@ -16,6 +16,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip'
 import { useSettingsStore } from '@/stores/settings'
 import { useQuerySettingsStore } from '@/stores/querySettings'
+import type { QuerySettings as QuerySettingsValues } from '@/stores/querySettings'
 import { useTranslation } from 'react-i18next'
 import { CircleHelp, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -51,7 +52,7 @@ export default function QuerySettings() {
   // close — this does. React's capture handler runs before that listener.
   const scopeHelpOpenAtPointerDown = useRef(false)
 
-  const handleChange = useCallback((key: keyof QueryRequest, value: any) => {
+  const handleChange = useCallback((key: keyof QuerySettingsValues, value: any) => {
     useQuerySettingsStore.getState().updateQuerySettings({ [key]: value })
   }, [])
 
@@ -201,7 +202,10 @@ export default function QuerySettings() {
               <div className="flex items-center gap-1">
                 <Select
                   value={querySettings.mode}
-                  onValueChange={(v) => handleChange('mode', v as QueryMode)}
+                  onValueChange={(v) => {
+                    handleChange('mode', v as QueryMode)
+                    if (v === 'bypass') handleChange('structured_context', false)
+                  }}
                 >
                   <SelectTrigger
                     id="query_mode_select"
@@ -479,6 +483,35 @@ export default function QuerySettings() {
                   onCheckedChange={(checked) => {
                     handleChange('only_need_context', checked)
                     if (checked) {
+                      handleChange('structured_context', false)
+                      handleChange('only_need_prompt', false)
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <label htmlFor="structured_context" className="flex-1 ml-1 cursor-help">
+                        {t('retrievePanel.querySettings.structuredContext')}
+                      </label>
+                    </TooltipTrigger>
+                    <TooltipContent side="left">
+                      <p>{t('retrievePanel.querySettings.structuredContextTooltip')}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <Checkbox
+                  className="mr-10 cursor-pointer"
+                  id="structured_context"
+                  checked={querySettings.structured_context ?? false}
+                  disabled={querySettings.mode === 'bypass'}
+                  onCheckedChange={(checked) => {
+                    handleChange('structured_context', checked)
+                    if (checked) {
+                      handleChange('only_need_context', false)
                       handleChange('only_need_prompt', false)
                     }
                   }}
@@ -505,6 +538,7 @@ export default function QuerySettings() {
                   onCheckedChange={(checked) => {
                     handleChange('only_need_prompt', checked)
                     if (checked) {
+                      handleChange('structured_context', false)
                       handleChange('only_need_context', false)
                     }
                   }}

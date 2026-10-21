@@ -21,11 +21,13 @@ import type { QueryRequest } from '@/api/lightrag'
  * that used to let one entry's writes clobber the other's saved parameters.
  */
 
-export type QuerySettings = Omit<QueryRequest, 'query'>
+export type QuerySettings = Omit<QueryRequest, 'query'> & {
+  structured_context?: boolean
+}
 
 interface QuerySettingsState {
   querySettings: QuerySettings
-  updateQuerySettings: (settings: Partial<QueryRequest>) => void
+  updateQuerySettings: (settings: Partial<QuerySettings>) => void
 }
 
 export const defaultQuerySettings: QuerySettings = {
@@ -36,6 +38,7 @@ export const defaultQuerySettings: QuerySettings = {
   max_relation_tokens: 8000,
   max_total_tokens: 30000,
   only_need_context: false,
+  structured_context: false,
   only_need_prompt: false,
   stream: true,
   history_turns: 0,
@@ -49,7 +52,7 @@ const useQuerySettingsStoreBase = create<QuerySettingsState>()(
     (set) => ({
       querySettings: { ...defaultQuerySettings },
 
-      updateQuerySettings: (settings: Partial<QueryRequest>) => {
+      updateQuerySettings: (settings: Partial<QuerySettings>) => {
         // Filter out history_turns to prevent changes, always keep it as 0
         const filteredSettings = { ...settings }
         delete filteredSettings.history_turns

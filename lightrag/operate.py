@@ -77,6 +77,7 @@ from lightrag.chunk_schema import (
     strip_internal_multimodal_markup_for_extraction,
 )
 from lightrag.prompt import PROMPTS, resolve_entity_extraction_prompt_profile
+from lightrag.prompt_admin_cache import prompt_admin_cache_digest
 from lightrag.constants import (
     GRAPH_FIELD_SEP,
     DEFAULT_MAX_ENTITY_TOKENS,
@@ -4889,6 +4890,7 @@ async def kg_query(
         *(("\n<system_prompt>\n", system_prompt) if system_prompt else ()),
         "\n<llm_identity>\n",
         serialize_llm_cache_identity(llm_cache_identity),
+        *(("\n<prompt_admin>\n", prompt_admin_cache_digest()) if prompt_admin_cache_digest() else ()),
     )
 
     cached_result = await handle_cache(
@@ -5137,6 +5139,7 @@ async def extract_keywords_only(
         language,
         "\n<llm_identity>\n",
         serialize_llm_cache_identity(llm_cache_identity),
+        *(("\n<prompt_admin>\n", prompt_admin_cache_digest()) if prompt_admin_cache_digest() else ()),
     )
     cached_result = await handle_cache(
         hashing_kv, args_hash, text, param.mode, cache_type="keywords"
@@ -7052,6 +7055,7 @@ async def naive_query(
         *(("\n<system_prompt>\n", system_prompt) if system_prompt else ()),
         "\n<llm_identity>\n",
         serialize_llm_cache_identity(llm_cache_identity),
+        *(("\n<prompt_admin>\n", prompt_admin_cache_digest()) if prompt_admin_cache_digest() else ()),
     )
     cached_result = await handle_cache(
         answer_cache_kv, args_hash, user_query, query_param.mode, cache_type="query"

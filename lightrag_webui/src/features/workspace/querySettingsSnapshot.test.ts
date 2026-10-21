@@ -26,6 +26,7 @@ const NON_DEFAULT_SETTINGS: QuerySettings = {
   max_relation_tokens: 2345,
   max_total_tokens: 4567,
   only_need_context: true,
+  structured_context: true,
   only_need_prompt: true,
   stream: false,
   history_turns: 3,
@@ -70,7 +71,7 @@ describe('workspace query settings snapshot', () => {
   test('clamps only the debug outlets', () => {
     // Pins the SIZE of the exemption list. A new clamp narrows the contract,
     // so it should have to be added here deliberately.
-    expect([...clampedKeys].sort()).toEqual(['only_need_context', 'only_need_prompt'])
+    expect([...clampedKeys].sort()).toEqual(['only_need_context', 'only_need_prompt', 'structured_context'])
   })
 
   test('does not mutate the stored settings', () => {

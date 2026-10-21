@@ -210,12 +210,14 @@ export default function MessageList({
   // Handle copying message content with robust clipboard support
   const handleCopyMessage = useCallback(
     async (message: MessageWithError) => {
-      const contentToCopy =
-        message.role === 'user'
-          ? message.content || ''
-          : message.displayContent !== undefined
-            ? message.displayContent
-            : message.content || ''
+      let contentToCopy = message.content || ''
+      if (message.role !== 'user') {
+        if (message.structuredData) {
+          contentToCopy = JSON.stringify(message.structuredData, null, 2)
+        } else if (message.displayContent !== undefined) {
+          contentToCopy = message.displayContent
+        }
+      }
 
       if (!contentToCopy.trim()) {
         toast.error(t('retrievePanel.chatMessage.copyEmpty', 'No content to copy'))

@@ -16,6 +16,7 @@ import EmptyCard from '@/components/ui/EmptyCard'
 import Checkbox from '@/components/ui/Checkbox'
 import UploadDocumentsDialog from '@/components/documents/UploadDocumentsDialog'
 import ClearDocumentsDialog from '@/components/documents/ClearDocumentsDialog'
+import EntityMergeSettingsDialog from '@/components/documents/EntityMergeSettingsDialog'
 import DeleteDocumentsDialog from '@/components/documents/DeleteDocumentsDialog'
 import PaginationControls from '@/components/ui/PaginationControls'
 import {
@@ -1523,6 +1524,7 @@ export default function DocumentManager() {
           )}
 
           <div className="flex gap-2">
+            <EntityMergeSettingsDialog />
             {isSelectionMode && (
               <DeleteDocumentsDialog
                 selectedDocIds={selectedDocIds}

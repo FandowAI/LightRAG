@@ -393,6 +393,9 @@ const axiosInstance = axios.create({
   }
 })
 
+// Reuse authentication, token renewal, and base URL in optional admin modules.
+export { axiosInstance as lightragAxios }
+
 // ========== Token Management ==========
 // Prevent multiple requests from triggering token refresh simultaneously
 let isRefreshingGuestToken = false;
@@ -672,6 +675,26 @@ export const queryText = async (
   signal?: AbortSignal
 ): Promise<QueryResponse> => {
   const response = await axiosInstance.post('/query', request, { signal })
+  return response.data
+}
+
+export type QueryDataResponse = {
+  status: string
+  message: string
+  data: {
+    entities?: Record<string, unknown>[]
+    relationships?: Record<string, unknown>[]
+    chunks?: Record<string, unknown>[]
+    references?: Record<string, unknown>[]
+  }
+  metadata: Record<string, unknown>
+}
+
+export const queryData = async (
+  request: QueryRequest,
+  signal?: AbortSignal
+): Promise<QueryDataResponse> => {
+  const response = await axiosInstance.post('/query/data', request, { signal })
   return response.data
 }
 

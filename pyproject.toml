@@ -220,7 +220,7 @@ include-package-data = true
 version = {attr = "lightrag._version.__version__"}
 
 [tool.setuptools.package-data]
-lightrag = ["api/webui/**/*", "api/static/**/*"]
+lightrag = ["api/webui/**/*", "api/static/**/*", "prompt_templates/zh/*.txt"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

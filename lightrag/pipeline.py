@@ -5800,8 +5800,11 @@ class _PipelineMixin:
                     # nodes/edges to merge — but we still need to flush the
                     # chunks_vdb / text_chunks writes (already done above)
                     # and reach PROCESSED.
+                    merge_stats = None
                     if not doc_process_opts.skip_kg:
-                        await merge_nodes_and_edges(
+                        merge_manager = getattr(self, "entity_merge", None)
+                        merge_func = merge_manager.merge if merge_manager else merge_nodes_and_edges
+                        merge_stats = await merge_func(
                             chunk_results=chunk_results,
                             knowledge_graph_inst=self.chunk_entity_relation_graph,
                             entity_vdb=self.entities_vdb,
@@ -5864,6 +5867,7 @@ class _PipelineMixin:
                         metadata_extra={
                             "process_start_time": process_start_time,
                             "process_end_time": process_end_time,
+                            **({"entity_merge": merge_stats} if merge_stats is not None else {}),
                             **extraction_meta,
                             # Empty on a clean run, which is what CLEARS a
                             # previous attempt's summary: the key is not in the

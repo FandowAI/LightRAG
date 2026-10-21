@@ -6050,6 +6050,7 @@ def create_document_routes(
                 rag.entity_chunks,
                 rag.relation_chunks,
                 rag.entities_vdb,
+                *([rag.entity_merge.name_vdb] if getattr(rag, "entity_merge", None) else []),
                 rag.relationships_vdb,
                 rag.chunks_vdb,
                 rag.chunk_entity_relation_graph,

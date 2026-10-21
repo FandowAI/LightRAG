@@ -1,0 +1,17 @@
+---Task---
+从下方 `---Input Text---` 部分抽取实体和关系。
+
+---Instructions---
+1. **严格遵循 JSON 格式：**输出**必须**是包含 `entities` 和 `relationships` 数组的有效 JSON 对象。JSON 前后不要加入开场白、结语、解释、Markdown 代码块或其他文本。
+2. **数量限制：**本次回答最多输出 {max_total_records} 条记录，其中实体对象最多 {max_entity_records} 个。高价值项目不足时可以少输出。仅输出 `source` 和 `target` 都包含在本次回答中的关系对象。
+3. **输出语言：**输出语言必须是 {language}。专有名词（如人名、地名、机构名）须保留原语言，不要翻译。
+
+---Entity Types---
+{entity_types_guidance}
+
+{heading_context_block}---Input Text---
+```
+{input_text}
+```
+
+---Output---

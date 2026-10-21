@@ -31,10 +31,10 @@ import type { MessageWithError } from '@/types/retrieval'
  * its own.
  */
 export function producesAiGeneratedOutput(
-  settings: Partial<Pick<QuerySettings, 'mode' | 'only_need_context' | 'only_need_prompt'>>
+  settings: Partial<Pick<QuerySettings, 'mode' | 'only_need_context' | 'only_need_prompt' | 'structured_context'>>
 ): boolean {
   if (settings.mode === 'bypass') return true
-  return !settings.only_need_context && !settings.only_need_prompt
+  return !settings.only_need_context && !settings.only_need_prompt && !settings.structured_context
 }
 
 /**

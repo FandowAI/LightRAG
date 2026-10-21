@@ -36,6 +36,7 @@ import type { QueryInputError } from './queryInput'
  */
 
 const requests: QueryRequest[] = []
+const dataRequests: QueryRequest[] = []
 let realApiModule: Record<string, unknown>
 let entries: { webui: ComponentType; workspace: ComponentType }
 
@@ -49,6 +50,14 @@ beforeAll(async () => {
     queryText: mock(async (params: QueryRequest) => {
       requests.push(params)
       return { response: '' }
+    }),
+    queryData: mock(async (params: QueryRequest) => {
+      dataRequests.push(params)
+      return {
+        status: 'success', message: 'ok',
+        data: { entities: [], relationships: [], chunks: [{ content: 'retrieved chunk', reference_id: '1' }], references: [] },
+        metadata: {}
+      }
     })
   }))
 
@@ -110,6 +119,7 @@ beforeEach(() => {
   fileSnapshot ??= captureProcessState(sharedStores)
   processSnapshot = captureProcessState(sharedStores)
   requests.length = 0
+  dataRequests.length = 0
   // The workspace empty state sits behind `useCustomizedContent`, which renders
   // a placeholder — and fires a real request — until a snapshot has settled.
   seedCustomization()
@@ -243,6 +253,22 @@ describe('query entry input handling', () => {
 })
 
 describe('query entry settings snapshot', () => {
+  test('only the admin structured option calls /query/data', async () => {
+    setQuerySettings({ mode: 'naive', structured_context: true, stream: true })
+
+    await send('webui', 'structured question')
+    expect(dataRequests).toHaveLength(1)
+    expect(requests).toHaveLength(0)
+    expect('structured_context' in dataRequests[0]).toBe(false)
+    expect(screen.queryAllByTestId('structured-context-result')).toHaveLength(1)
+    cleanup()
+
+    dataRequests.length = 0
+    await send('workspace', 'structured question')
+    expect(dataRequests).toHaveLength(0)
+    expect(requests).toHaveLength(1)
+  })
+
   test('the workspace entry clamps the debug-only switches and inherits the rest', async () => {
     // Both entries read the SAME stored settings; only the workspace overrides
     // anything. Values here are deliberately non-default so an entry that

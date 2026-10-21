@@ -20,6 +20,7 @@ import { LoaderIcon, ChevronDownIcon, ClockIcon, ZapIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAiContentNoticeStore } from '@/stores/aiContentNotice'
 import { shouldShowAiContentNotice } from '@/lib/aiContentNotice'
+import { StructuredContextResult } from './StructuredContextResult'
 
 // KaTeX configuration options interface
 interface KaTeXOptions {
@@ -175,7 +176,7 @@ export const ChatMessage = ({
 
   // Whether the assistant has begun emitting visible answer text. Drives both
   // where the timing row is placed and whether retrieval progress is shown.
-  const hasContent = !!finalDisplayContent && finalDisplayContent.trim() !== ''
+  const hasContent = Boolean(message.structuredData) || (!!finalDisplayContent && finalDisplayContent.trim() !== '')
 
   // AI-generated content notice (ENABLE_AI_CONTENT_NOTICE): a trailing item on
   // the meta row below the answer, never a line of its own. What may carry the
@@ -326,7 +327,9 @@ export const ChatMessage = ({
           100ms stopwatch re-render (which only changes the timing row) does NOT
           re-run the markdown / syntax-highlight / KaTeX pipeline over the whole
           answer — it re-renders only when content/theme/latex/role change. */}
-      {finalDisplayContent && (
+      {message.structuredData ? (
+        <StructuredContextResult result={message.structuredData} />
+      ) : finalDisplayContent && (
         <MessageMarkdown
           content={finalDisplayContent}
           components={mainMarkdownComponents}

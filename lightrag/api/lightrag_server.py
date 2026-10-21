@@ -71,6 +71,10 @@ from lightrag.parser.routing import (
 )
 from lightrag.parser.external.mineru.cache import MinerUParserOptions
 from lightrag.api.routers.query_routes import create_query_routes
+from lightrag.api.routers.prompt_admin_routes import create_prompt_admin_routes
+from lightrag.api.routers.entity_merge_routes import create_entity_merge_routes
+from lightrag.entity_merge import EntityMergeManager
+from lightrag.prompt_admin import PromptAdmin
 from lightrag.api.routers.graph_routes import create_graph_routes
 from lightrag.api.routers.ollama_api import OllamaAPI
 from lightrag.api.routers.ui_customization_routes import create_ui_customization_routes
@@ -1647,6 +1651,8 @@ def create_app(args):
             # Initialize database connections
             # Note: initialize_storages() now auto-initializes pipeline_status for rag.workspace
             await rag.initialize_storages()
+            if entity_merge is not None:
+                await entity_merge.initialize()
 
             # Data migration regardless of storage implementation
             await rag.check_and_migrate_data()
@@ -1685,6 +1691,8 @@ def create_app(args):
             )
 
             # Clean up database connections
+            if entity_merge is not None:
+                await entity_merge.finalize()
             await rag.finalize_storages()
 
             if "LIGHTRAG_GUNICORN_MODE" not in os.environ:
@@ -2582,6 +2590,11 @@ def create_app(args):
 
     _log_role_provider_options(rag)
 
+    entity_merge = None
+    if args.vector_storage == "MilvusVectorDBStorage" and args.graph_storage == "Neo4JStorage":
+        entity_merge = EntityMergeManager(rag, args.working_dir, args.workspace)
+        rag.entity_merge = entity_merge
+
     rag.register_role_llm_builder(
         lambda role, meta: (
             create_role_llm_func(role, meta),
@@ -2595,6 +2608,11 @@ def create_app(args):
     app.include_router(create_document_routes(rag, doc_manager, api_key))
     app.include_router(create_query_routes(rag, api_key, args.top_k))
     app.include_router(create_graph_routes(rag, api_key))
+    if entity_merge is not None:
+        app.include_router(create_entity_merge_routes(entity_merge, api_key, args.workers))
+    # Local prompt overlay: one isolated router and no edits to upstream routes.
+    prompt_admin = PromptAdmin(rag, args.working_dir, args.workspace, args.workers)
+    app.include_router(create_prompt_admin_routes(prompt_admin, api_key))
     # Public read-only customization surface — registered unconditionally:
     # without a bundle it answers 200 {"customized": false, ...}.
     app.include_router(

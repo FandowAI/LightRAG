@@ -89,6 +89,12 @@ describe('serializer equivalence', () => {
     expect(body.include_progress).toBe(true)
     expect(body.query).toBe('q')
   })
+
+  test('structured context stays client-side and does not leak into the API body', () => {
+    const body = serializeQueryRequest({ ...baseSettings('naive'), structured_context: true }, 'what is RAG', [])
+    expect('structured_context' in body).toBe(false)
+    expect(body.mode).toBe('naive')
+  })
 })
 
 describe('serializer source purity', () => {

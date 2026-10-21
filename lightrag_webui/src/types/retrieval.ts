@@ -8,8 +8,10 @@
  */
 
 import type { Message } from '@/api/lightrag'
+import type { QueryDataResponse } from '@/api/lightrag'
 
 export type MessageWithError = Message & {
+  structuredData?: QueryDataResponse
   id: string // Unique identifier for stable React keys
   isError?: boolean
   isThinking?: boolean // Flag to indicate if the message is in a "thinking" state

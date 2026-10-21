@@ -892,7 +892,30 @@ class MilvusVectorDBStorage(BaseVectorStorage):
         ]
 
         # Determine specific fields based on namespace
-        if self.namespace.endswith("entities"):
+        if self.namespace == "name_entities":
+            specific_fields = [
+                FieldSchema(
+                    name="entity_name",
+                    dtype=DataType.VARCHAR,
+                    max_length=varchar_limits["entity_name"],
+                    nullable=True,
+                ),
+                FieldSchema(
+                    name="entity_type",
+                    dtype=DataType.VARCHAR,
+                    max_length=varchar_limits["entity_type"],
+                    nullable=True,
+                ),
+                FieldSchema(
+                    name="content",
+                    dtype=DataType.VARCHAR,
+                    max_length=varchar_limits["content"],
+                    nullable=True,
+                ),
+            ]
+            description = "LightRAG entity name embeddings"
+
+        elif self.namespace.endswith("entities"):
             specific_fields = [
                 FieldSchema(
                     name="entity_name",
@@ -1006,6 +1029,8 @@ class MilvusVectorDBStorage(BaseVectorStorage):
             "content": MILVUS_MAX_VARCHAR_BYTES,
             "file_path": DEFAULT_MAX_FILE_PATH_LENGTH,
         }
+        if self.namespace == "name_entities":
+            return {**base_fields, "entity_name": 512, "entity_type": 128}
         if self.namespace.endswith("entities"):
             return {
                 **base_fields,
@@ -1024,6 +1049,8 @@ class MilvusVectorDBStorage(BaseVectorStorage):
         return base_fields
 
     def _get_migrated_metadata_field_limits(self) -> dict[str, int]:
+        if self.namespace == "name_entities":
+            return {"content": MILVUS_MAX_VARCHAR_BYTES}
         if self.namespace.endswith("entities"):
             return {
                 "content": MILVUS_MAX_VARCHAR_BYTES,
@@ -1330,7 +1357,13 @@ class MilvusVectorDBStorage(BaseVectorStorage):
         }
 
         # Add specific fields based on namespace
-        if self.namespace.endswith("entities"):
+        if self.namespace == "name_entities":
+            specific_fields = {
+                "entity_name": {"type": "VarChar"},
+                "entity_type": {"type": "VarChar"},
+                "content": {"type": "VarChar"},
+            }
+        elif self.namespace.endswith("entities"):
             specific_fields = {
                 "entity_name": {"type": "VarChar"},
                 "content": {"type": "VarChar"},
@@ -2750,7 +2783,8 @@ class MilvusVectorDBStorage(BaseVectorStorage):
             gate.release_read()
 
     async def query(
-        self, query: str, top_k: int, query_embedding: list[float] = None
+        self, query: str, top_k: int, query_embedding: list[float] = None,
+        *, filter_expr: str | None = None,
     ) -> list[dict[str, Any]]:
         """Similarity search against the persisted Milvus collection.
 
@@ -2789,6 +2823,7 @@ class MilvusVectorDBStorage(BaseVectorStorage):
         }
 
         # Re-gated: the embedding round trip above can have taken seconds.
+        search_kwargs = {"filter": filter_expr} if filter_expr is not None else {}
         results = await self._run_gated(
             self._client.search,
             collection_name=self.final_namespace,
@@ -2796,6 +2831,7 @@ class MilvusVectorDBStorage(BaseVectorStorage):
             limit=top_k,
             output_fields=output_fields,
             search_params=search_params,
+            **search_kwargs,
         )
         return [
             {

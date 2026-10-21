@@ -2843,74 +2843,80 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
                     # superset across every attempt. Union is safe on the
                     # consuming side by contract: candidates are a superset,
                     # and purge/commit treat absent objects as no-ops.
-                    candidate_entities, candidate_relations = (
-                        collect_kg_merge_candidates(chunk_results or [])
-                    )
-                    candidate_entities |= {
-                        name
-                        for name in (journal.get("entity_names") or [])
-                        if isinstance(name, str) and name
-                    }
-                    candidate_relations |= {
-                        (pair[0], pair[1])
-                        for pair in (journal.get("relation_pairs") or [])
-                        if isinstance(pair, (list, tuple)) and len(pair) == 2
-                    }
-                    journal = {
-                        **journal,
-                        "phase": "applying",
-                        "entity_names": sorted(candidate_entities),
-                        "relation_pairs": [
-                            list(pair) for pair in sorted(candidate_relations)
-                        ],
-                        # Write-ahead for the truncation record too. The
-                        # invariant: any truncation event whose subject's
-                        # graph mutation has landed is already journaled —
-                        # extraction-stage events by this write (which
-                        # precedes ALL merge mutation), summary-stage events
-                        # by _journal_truncation_write_ahead (awaited before
-                        # the object carrying the truncated summary is
-                        # upserted).
-                        "operation_llm_truncation": _operation_truncation_record(),
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
-                    }
-                    status_row = await self._upsert_custom_chunk_status(
-                        doc_key,
-                        DocStatus.PROCESSING,
-                        base_row=status_row,
-                        journal=journal,
-                    )
-
-                    # Stage 3: merge into the knowledge graph. In patch mode
-                    # the merge must NOT touch the base document's
-                    # full_entities/full_relations rows (passing None skips the
-                    # merge's own anchor prewrite — the journal is this
-                    # operation's anchor); candidates are UNIONED into the base
-                    # rows only at commit. Create mode uses the merge's normal
-                    # write-ahead anchor prewrite.
-                    if chunk_results:
-                        await merge_nodes_and_edges(
-                            chunk_results=chunk_results,
-                            knowledge_graph_inst=self.chunk_entity_relation_graph,
-                            entity_vdb=self.entities_vdb,
-                            relationships_vdb=self.relationships_vdb,
-                            global_config=self._build_global_config(),
-                            full_entities_storage=(
-                                self.full_entities if mode == "create" else None
-                            ),
-                            full_relations_storage=(
-                                self.full_relations if mode == "create" else None
-                            ),
-                            doc_id=doc_key,
-                            pipeline_status=pipeline_status,
-                            pipeline_status_lock=pipeline_status_lock,
-                            llm_response_cache=self.llm_response_cache,
-                            entity_chunks_storage=self.entity_chunks,
-                            relation_chunks_storage=self.relation_chunks,
-                            file_path=file_path,
-                            truncation_tally=truncation_tally,
-                            truncation_write_ahead=_journal_truncation_write_ahead,
+                    merge_manager = getattr(self, "entity_merge", None)
+                    async with (merge_manager.lock() if merge_manager else nullcontext()):
+                        if merge_manager and chunk_results:
+                            chunk_results, _ = await merge_manager.resolve(chunk_results)
+                        candidate_entities, candidate_relations = (
+                            collect_kg_merge_candidates(chunk_results or [])
                         )
+                        candidate_entities |= {
+                            name
+                            for name in (journal.get("entity_names") or [])
+                            if isinstance(name, str) and name
+                        }
+                        candidate_relations |= {
+                            (pair[0], pair[1])
+                            for pair in (journal.get("relation_pairs") or [])
+                            if isinstance(pair, (list, tuple)) and len(pair) == 2
+                        }
+                        journal = {
+                            **journal,
+                            "phase": "applying",
+                            "entity_names": sorted(candidate_entities),
+                            "relation_pairs": [
+                                list(pair) for pair in sorted(candidate_relations)
+                            ],
+                            # Write-ahead for the truncation record too. The
+                            # invariant: any truncation event whose subject's
+                            # graph mutation has landed is already journaled —
+                            # extraction-stage events by this write (which
+                            # precedes ALL merge mutation), summary-stage events
+                            # by _journal_truncation_write_ahead (awaited before
+                            # the object carrying the truncated summary is
+                            # upserted).
+                            "operation_llm_truncation": _operation_truncation_record(),
+                            "updated_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                        status_row = await self._upsert_custom_chunk_status(
+                            doc_key,
+                            DocStatus.PROCESSING,
+                            base_row=status_row,
+                            journal=journal,
+                        )
+
+                        # Stage 3: merge into the knowledge graph. In patch mode
+                        # the merge must NOT touch the base document's
+                        # full_entities/full_relations rows (passing None skips the
+                        # merge's own anchor prewrite — the journal is this
+                        # operation's anchor); candidates are UNIONED into the base
+                        # rows only at commit. Create mode uses the merge's normal
+                        # write-ahead anchor prewrite.
+                        if chunk_results:
+                            merge_func = merge_manager.merge_unlocked if merge_manager else merge_nodes_and_edges
+                            await merge_func(
+                                chunk_results=chunk_results,
+                                **({"already_resolved": True} if merge_manager else {}),
+                                knowledge_graph_inst=self.chunk_entity_relation_graph,
+                                entity_vdb=self.entities_vdb,
+                                relationships_vdb=self.relationships_vdb,
+                                global_config=self._build_global_config(),
+                                full_entities_storage=(
+                                    self.full_entities if mode == "create" else None
+                                ),
+                                full_relations_storage=(
+                                    self.full_relations if mode == "create" else None
+                                ),
+                                doc_id=doc_key,
+                                pipeline_status=pipeline_status,
+                                pipeline_status_lock=pipeline_status_lock,
+                                llm_response_cache=self.llm_response_cache,
+                                entity_chunks_storage=self.entity_chunks,
+                                relation_chunks_storage=self.relation_chunks,
+                                file_path=file_path,
+                                truncation_tally=truncation_tally,
+                                truncation_write_ahead=_journal_truncation_write_ahead,
+                            )
 
                     # ---- Commit: flush ALL derived stores, union the
                     # accumulated candidates into the document's anchors, then
@@ -4813,6 +4819,11 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
                     # on disk. Stamp the very exception that is propagating --
                     # only after the flush returns, so the claim is true.
                     await self._insert_done_with_cleanup()
+                    merge_manager = getattr(self, "entity_merge", None)
+                    if merge_manager:
+                        await merge_manager.sync_candidates(
+                            [({name: [] for name in lock_key_set}, {})]
+                        )
                     if interrupted is not None:
                         mark_cancellation_deferred(interrupted)
 
@@ -6647,6 +6658,10 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
                     list(entities_to_delete)
                 )
 
+                merge_manager = getattr(self, "entity_merge", None)
+                if merge_manager:
+                    await merge_manager.delete_names(entities_to_delete)
+
                 entity_vdb_ids = [
                     compute_mdhash_id(entity, prefix="ent-")
                     for entity in entities_to_delete
@@ -7966,7 +7981,7 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
         from lightrag.utils_graph import adelete_by_entity
 
         async with self._admin_write_gate("adelete_by_entity"):
-            return await adelete_by_entity(
+            result = await adelete_by_entity(
                 self.chunk_entity_relation_graph,
                 self.entities_vdb,
                 self.relationships_vdb,
@@ -7974,6 +7989,10 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
                 entity_chunks_storage=self.entity_chunks,
                 relation_chunks_storage=self.relation_chunks,
             )
+            merge_manager = getattr(self, "entity_merge", None)
+            if merge_manager and result.status == "success":
+                await merge_manager.delete_names([entity_name])
+            return result
 
     def delete_by_entity(self, entity_name: str) -> DeletionResult:
         """Synchronously delete an entity and all its relationships.
@@ -8144,7 +8163,7 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
         from lightrag.utils_graph import aedit_entity
 
         async with self._admin_write_gate("aedit_entity"):
-            return await aedit_entity(
+            result = await aedit_entity(
                 self.chunk_entity_relation_graph,
                 self.entities_vdb,
                 self.relationships_vdb,
@@ -8155,6 +8174,13 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
                 self.entity_chunks,
                 self.relation_chunks,
             )
+            merge_manager = getattr(self, "entity_merge", None)
+            if merge_manager:
+                new_name = updated_data.get("entity_name") or entity_name
+                if new_name != entity_name:
+                    await merge_manager.delete_names([entity_name])
+                await merge_manager.sync_candidates([({new_name: []}, {})])
+            return result
 
     def edit_entity(
         self,
@@ -8235,7 +8261,7 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
         from lightrag.utils_graph import acreate_entity
 
         async with self._admin_write_gate("acreate_entity"):
-            return await acreate_entity(
+            result = await acreate_entity(
                 self.chunk_entity_relation_graph,
                 self.entities_vdb,
                 self.relationships_vdb,
@@ -8245,6 +8271,10 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
                 entity_chunks_storage=self.entity_chunks,
                 relation_chunks_storage=self.relation_chunks,
             )
+            merge_manager = getattr(self, "entity_merge", None)
+            if merge_manager:
+                await merge_manager.sync_candidates([({entity_name: []}, {})])
+            return result
 
     def create_entity(
         self, entity_name: str, entity_data: dict[str, Any]
@@ -8336,7 +8366,7 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
         from lightrag.utils_graph import amerge_entities
 
         async with self._admin_write_gate("amerge_entities"):
-            return await amerge_entities(
+            result = await amerge_entities(
                 self.chunk_entity_relation_graph,
                 self.entities_vdb,
                 self.relationships_vdb,
@@ -8347,6 +8377,11 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
                 self.entity_chunks,
                 self.relation_chunks,
             )
+            merge_manager = getattr(self, "entity_merge", None)
+            if merge_manager:
+                await merge_manager.delete_names(set(source_entities) - {target_entity})
+                await merge_manager.sync_candidates([({target_entity: []}, {})])
+            return result
 
     def merge_entities(
         self,

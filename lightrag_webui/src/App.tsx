@@ -23,6 +23,7 @@ import { ZapIcon } from 'lucide-react'
 import GraphViewer from '@/features/GraphViewer'
 import DocumentManager from '@/features/DocumentManager'
 import RetrievalView from '@/features/RetrievalView'
+import PromptManager from '@/features/PromptManager'
 
 import { Tabs, TabsContent } from '@/components/ui/Tabs'
 import ErrorBoundary from '@/components/ErrorBoundary'
@@ -240,6 +241,11 @@ function App() {
                 <TabsContent value="retrieval" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
                   <ErrorBoundary>
                     <RetrievalView key={identityEpoch} />
+                  </ErrorBoundary>
+                </TabsContent>
+                <TabsContent value="prompts" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
+                  <ErrorBoundary>
+                    <PromptManager />
                   </ErrorBoundary>
                 </TabsContent>
               </div>

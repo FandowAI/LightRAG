@@ -1,0 +1,25 @@
+
+知识图谱数据（实体）：
+
+```json
+{entities_str}
+```
+
+知识图谱数据（关系）：
+
+```json
+{relations_str}
+```
+
+文档文本块（每条记录的 reference_id 对应下方 `参考文档列表`；可选的 `content_headings` 字段表示该块在来源文档中的章节路径，例如 `第 1 章 → 1.2 小节`）：
+
+```json
+{text_chunks_str}
+```
+
+参考文档列表（每条以 [reference_id] 开头，与文档文本块中的记录对应）：
+
+```
+{reference_list_str}
+```
+

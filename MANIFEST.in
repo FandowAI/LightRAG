@@ -2,4 +2,5 @@ include requirements.txt
 include lightrag/api/requirements.txt
 recursive-include lightrag/api/webui *
 recursive-include lightrag/api/static *
+recursive-include lightrag/prompt_templates/zh *.txt
 recursive-include prompts/samples *

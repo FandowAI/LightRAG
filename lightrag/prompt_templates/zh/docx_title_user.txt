@@ -1,0 +1,11 @@
+段落（带索引；[BLANK] 表示原文中的空行）：
+
+{window}
+
+{dominance}规则：
+- 首先判断 "is_title_block"。
+- 如果为 true：填写必需的 "main_title"（绝不能是前置材料或记录性标题——目录 / 目次 / 更改记录 / 修订记录 / 修改记录 / 变更记录 / 版本记录 / 更改页 / 修订页 / 前言 / 引言 / 摘要 / 编制说明，或对应的英文标题 Contents / Table of Contents / Revision History / Change Record / Change Log / Document History / Foreword / Abstract；判断时不区分大小写，并忽略汉字之间的空格；仅在较长标题中包含这些词，例如“更改记录管理规范”，则可以接受；单位、公司、机构名称只能作为最后的备选主标题，应优先选择最大字号层级中的其他合适文本，但如果放大的行中没有更好的候选，单位名称就是主标题，整个窗口就是标题块；如果单位名称与真正的主标题并列出现，应填入 "publisher"；绝不能把以“文件”结尾的红头文件发文机关行，如“某某市人民政府文件”，当作主标题，该行属于发布单位，应填入 "publisher"），并根据原文填写存在的 "sub_title" / "doc_number" / "classification" / "publisher" / "date"；各字段必须原样取自上述段落（主标题允许拼接连续段落）；缺失字段填 null，并将 "headings" 和 "body" 设为 []。
+- 如果为 false：将六个文本字段全部设为 null，并把每个索引——{indices}——准确归入 "headings"（真正的章节标题，例如前言 / 第一章 / 目录 / 更改记录）或 "body"（其余所有内容；文档编号、日期、发布单位行不是章节标题，应归入 "body"）。每个索引必须且只能出现在一个数组中，类型为整数，不是字符串。
+
+返回符合以下结构的 JSON：
+{{"is_title_block": true|false, "main_title": string|null, "sub_title": string|null, "doc_number": string|null, "classification": string|null, "publisher": string|null, "date": string|null, "headings": [int, ...], "body": [int, ...]}}

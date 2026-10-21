@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { queryText, queryTextStream } from '@/api/lightrag'
+import { queryData, queryText, queryTextStream } from '@/api/lightrag'
 import type { QueryMode } from '@/api/lightrag'
 import { isAuthenticationRequiredError } from '@/api/errors'
 import { errorMessage } from '@/lib/utils'
@@ -311,7 +311,7 @@ export function useQuerySession({
       responseStartRef.current = Date.now()
       serverResponseTimeRef.current = null
       firstTokenRecordedRef.current = false
-      isStreamingRef.current = snapshot.stream ?? false
+      isStreamingRef.current = Boolean(snapshot.stream && !snapshot.structured_context)
       assistantMessage.responseTime = 0
       assistantMessage.firstTokenTime = null
       if (responseTimerRef.current) clearInterval(responseTimerRef.current)
@@ -438,7 +438,20 @@ export function useQuerySession({
 
       try {
         // Run query
-        if (snapshot.stream) {
+        if (snapshot.structured_context && snapshot.mode !== 'bypass') {
+          const response = await queryData(queryParams, controller.signal)
+          if (response.status !== 'success') {
+            updateAssistantMessage(response.message || t('retrievePanel.retrieval.error'), true)
+          } else {
+            assistantMessage.structuredData = response
+            assistantMessage.content = t('retrievePanel.querySettings.structuredContext')
+            setMessages((current) => current.map((message) =>
+              message.id === assistantMessage.id
+                ? { ...message, structuredData: response, content: assistantMessage.content }
+                : message
+            ))
+          }
+        } else if (snapshot.stream) {
           let streamError = ''
           await queryTextStream(
             queryParams,

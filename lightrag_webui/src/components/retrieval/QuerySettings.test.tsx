@@ -7,6 +7,7 @@ import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react
 import { renderWithProviders } from '@/test/render'
 import en from '@/locales/en.json'
 import QuerySettings from './QuerySettings'
+import { defaultQuerySettings, useQuerySettingsStore } from '@/stores/querySettings'
 
 /**
  * The parameters edited in this panel are per-browser local state that the
@@ -18,6 +19,35 @@ import QuerySettings from './QuerySettings'
  * including by TAP: a device with no hover has nothing else to open it with.
  */
 const strings = en.retrievePanel.querySettings
+
+describe('structured context option', () => {
+  afterEach(() => {
+    cleanup()
+    useQuerySettingsStore.setState({ querySettings: { ...defaultQuerySettings } })
+  })
+
+  test('is exclusive with the two existing debug options', () => {
+    useQuerySettingsStore.setState({
+      querySettings: { ...defaultQuerySettings, only_need_context: true }
+    })
+    renderWithProviders(<QuerySettings />)
+    fireEvent.click(screen.getByRole('checkbox', { name: strings.structuredContext }))
+    expect(useQuerySettingsStore.getState().querySettings.structured_context).toBe(true)
+    expect(useQuerySettingsStore.getState().querySettings.only_need_context).toBe(false)
+
+    fireEvent.click(screen.getByRole('checkbox', { name: strings.onlyNeedPrompt }))
+    expect(useQuerySettingsStore.getState().querySettings.only_need_prompt).toBe(true)
+    expect(useQuerySettingsStore.getState().querySettings.structured_context).toBe(false)
+  })
+
+  test('is unavailable for bypass mode', () => {
+    useQuerySettingsStore.setState({
+      querySettings: { ...defaultQuerySettings, mode: 'bypass' }
+    })
+    renderWithProviders(<QuerySettings />)
+    expect(screen.getByRole('checkbox', { name: strings.structuredContext }).hasAttribute('disabled')).toBe(true)
+  })
+})
 
 describe('QuerySettings scope notice', () => {
   afterEach(() => {

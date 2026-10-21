@@ -13,6 +13,7 @@ import type { QuerySettings } from '@/stores/querySettings'
  */
 export const WORKSPACE_CLAMPED_SETTINGS = {
   only_need_context: false,
+  structured_context: false,
   only_need_prompt: false
 } as const satisfies Partial<QuerySettings>
 
