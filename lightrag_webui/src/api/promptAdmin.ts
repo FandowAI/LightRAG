@@ -54,4 +54,3 @@ export const publishPromptDraft = async (group: string, revision: number): Promi
 
 export const resetPromptGroup = async (group: string, revision: number, language: 'zh' | 'en' = 'zh'): Promise<PromptSnapshot> =>
   (await lightragAxios.post<PromptSnapshot>(`${root}/${group}/reset`, { revision, language })).data
-

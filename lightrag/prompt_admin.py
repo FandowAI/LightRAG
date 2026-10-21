@@ -421,4 +421,3 @@ class PromptAdmin:
             raise PermissionError("Prompt editing requires a single server worker")
         if revision != self._state["revision"]:
             raise PromptEditorConflict("Prompt profile changed; reload before editing")
-

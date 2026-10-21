@@ -372,4 +372,3 @@ def test_explicit_external_profile_is_preserved_even_when_text_matches_builtin(t
     assert manager.defaults["entity_extraction_json_examples"] == [
         item.rstrip() for item in manager.project_defaults["entity_extraction_json_examples"]
     ]
-
