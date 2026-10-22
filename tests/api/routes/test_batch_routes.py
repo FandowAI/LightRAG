@@ -65,7 +65,7 @@ def test_explicit_start_freezes_unique_centers_and_retrieval_settings(client):
     centers, settings = jobs.start.call_args.args
     assert centers == ["a", "b"]
     assert (
-        settings.graph_depth == 2 and settings.rag_top_k == 30 and settings.near_dedup
+        settings.graph_depth == 2 and settings.rag_top_k == 10 and settings.near_dedup
     )
 
 

@@ -5,10 +5,9 @@ One selected center produces at most one logical package. See
 [H200 deployment](../../deploy/h200/README.md) for the published JSONL schema.
 
 Production retrieval reuses the colleague's bounded graph-mode DFS, with
-exact canonical names, depth 2 and 30 vector candidates by default. The
-standalone `/query/entity-packages` endpoint returns the evidence candidate
-set for one center; the batch workflow additionally selects grounded topics
-and deduplicates original text across centers before publication.
+exact canonical names, depth 2 and 10 vector candidates by default. Both the
+standalone endpoint and production batch return original evidence without any
+topic/relevance judgment. Batches additionally deduplicate text across centers.
 
 Tracking anchors outrank graph source IDs, including authoritative empty
 tracking rows. Only processed source documents may contribute training evidence.
@@ -22,11 +21,11 @@ endpoints and source IDs are exported explicitly, and must resolve to complete
 original chunks in the shared `sources.jsonl`. The teacher text only includes
 relevance-selected literal passages; no generated summary replaces its sources.
 
-Near matching is conservative: scope, date, numeric, unit and negation guards
-must agree, then a role-model judgment must confirm full information equivalence
-using exact source quotes. Similarity alone never deletes unique facts. Failed
-judgments keep both originals and leave an audit. Cross-package ownership is
-based on highest relevance with deterministic ties, not retrieval order.
+Near matching is conservative: 0.995 lexical similarity and matching guards
+are required before a rare model check. The whole batch shares a default budget
+of two confirmations. Exact text uses local rules. Unique, uncertain and failed
+judgments keep both originals, without review. Shared text belongs to the first
+successfully committed center, and later centers retain references.
 
 A 12,000-token notice is a review hint, not a truncation or model context limit.
 A logical package may require several downstream teacher requests. The current

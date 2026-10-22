@@ -14,7 +14,7 @@ class BatchRequest(BaseModel):
     model_config = {"extra": "forbid"}
     centers: list[str] = Field(min_length=1, max_length=500)
     graph_depth: int = Field(default=2, ge=0, le=5)
-    rag_top_k: int = Field(default=30, ge=1, le=100)
+    rag_top_k: int = Field(default=10, ge=1, le=100)
 
     @field_validator("centers")
     @classmethod

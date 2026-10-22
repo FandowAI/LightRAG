@@ -406,9 +406,9 @@ class EntityPackageRequest(BaseModel):
 
     entity_name: str = Field(min_length=1, max_length=512)
     graph_depth: int = Field(default=2, ge=0, le=5)
-    rag_top_k: int = Field(default=30, ge=1, le=100)
+    rag_top_k: int = Field(default=10, ge=1, le=100)
     near_dedup: bool = True
-    near_threshold: float = Field(default=0.92, ge=0.8, le=1)
+    near_threshold: float = Field(default=0.995, ge=0.8, le=1)
 
     @model_validator(mode="after")
     def require_entity_name(self):

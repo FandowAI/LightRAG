@@ -49,7 +49,9 @@ sudo journalctl -u fando-lightrag -n 100 --no-pager
 
 后台保持单实例、单 worker；SQLite 任务账本和身份索引使用本机持久磁盘。水平扩容前需把任务执行与账本迁移到集中式队列/数据库。生产鉴权沿用原项目，批次为当前工作区共享资源，并非按用户独立授权。
 
-首次验收用少量已授权资料：上传文件夹 → 确认文档处理完成 → 批量检索 → 选择少量中心 → 开始。默认深度 2、向量候选 30。图遍历复用同事的算法；普通测试接口保持 100 实体 / 200 关系上限。批量任务单独使用 `LIGHTRAG_BATCH_MAX_GRAPH_NODES=10000`、`LIGHTRAG_BATCH_MAX_GRAPH_RELATIONS=20000`，也可下调。资料包触及上限会明确失败，应降低深度或评估后调整批量上限，避免把截断结果误当成完整资料。
+新批次直接执行“召回 → 包内及跨包去重 → 保存”，不做大模型相关性筛选，也没有原文待复核。仅极高相似的疑似重复才调用模型确认，整批最多 2 次（`LIGHTRAG_DEDUP_MAX_LLM_CHECKS` 可设为 0 禁用）；无法确认则两份都保留。
+
+首次验收用少量已授权资料：上传文件夹 → 确认文档处理完成 → 批量检索 → 选择少量中心 → 开始。默认深度 2、向量候选 10。图遍历复用同事的算法；普通测试接口保持 100 实体 / 200 关系上限。批量任务单独使用 `LIGHTRAG_BATCH_MAX_GRAPH_NODES=10000`、`LIGHTRAG_BATCH_MAX_GRAPH_RELATIONS=20000`，也可下调。资料包触及上限会明确失败，应降低深度或评估后调整批量上限，避免把截断结果误当成完整资料。
 
 ## 3. 资料包实际保存位置
 
@@ -64,8 +66,7 @@ sudo journalctl -u fando-lightrag -n 100 --no-pager
     ├── manifest.json           # 文件行数、SHA-256、格式版本；交付完成标记
     ├── entity-0000.json        # 各中心结果与去重引用
     ├── candidate-0000.json     # 召回快照
-    ├── focus-<hash>.json       # 相关性筛选依据、原文位置与待复核内容
-    └── focus-dedup-audit.json  # 去重审计
+    └── candidate-0001.json     # 后续中心的召回快照
 ```
 
 接口返回的 `export_path` 是服务器上的绝对路径，页面也会展示。修改 `LIGHTRAG_BATCH_OUTPUT_DIR` 可调整目录；不要把目录放到 Git 工作树或临时目录。交接整个批次目录中的两个 JSONL 和 `manifest.json`，不能只拿走资料包而丢弃来源文件。
@@ -78,15 +79,15 @@ sudo journalctl -u fando-lightrag -n 100 --no-pager
 | `batch_id / package_id / central_entity` | 批次、资料包、中心实体 |
 | `entities` | 实体名、类型、描述、图路径和来源块 ID |
 | `relationships` | 两端实体、关系描述、关键词、权重和来源块 ID |
-| `original_texts` | 筛选后的原文片段、来源、字符区间；保留条件、否定和决策依据 |
+| `original_texts` | 召回原文、来源及去重引用；原样保留条件、否定和决策依据 |
 | `shared_evidence` | 跨包重复内容的所有者引用，不重复塞入原文 |
 | `source_archive` | 同目录下的 `sources.jsonl` |
 
-关系和实体描述是图谱索引，不能直接当作事实标签。关系引用的是完整原文块；筛选后的片段可能只覆盖该块的一部分，核验关系时须读 `sources.jsonl` 的完整原文。没有可证实关系的资料包允许 `relationships=[]`，禁止凭空补关系。
+关系和实体描述是图谱索引，不能直接当作事实标签。关系引用的是完整原文块；核验关系时须读 `sources.jsonl` 的完整原文。没有可证实关系的资料包允许 `relationships=[]`，禁止凭空补关系。
 
-`sources.jsonl` 每行包含 `chunk_id / text / content_sha256 / provenance`。导出前验证片段字符区间可以还原原文、关系端点存在、来源块可找到。完整来源按块集中存储，避免多个包反复复制。不同块之间仍可能有原始切块重叠；实际蒸馏输入使用已经去重的片段。
+`sources.jsonl` 每行包含 `chunk_id / text / content_sha256 / provenance`。导出前验证片段字符区间可以还原原文、关系端点存在、来源块可找到。完整来源按块集中存储，避免多个包反复复制。不同块之间仍可能有原始切块重叠；实际蒸馏输入使用已经去重的原文。
 
-消费者只处理已有 `manifest.json` 且两份文件哈希和行数匹配的批次。`completed_with_errors` 只说明成功部分已交付，失败与待复核原文仍留在审计中，不会混入训练输入。停止或进程中断不自动重发付费模型请求。
+消费者只处理已有 `manifest.json` 且两份文件哈希和行数匹配的批次。`completed_with_errors` 只说明成功部分已交付，技术性检索失败仍留在记录中；无内容审核或待复核环节，召回原文经去重后直接进入资料包。停止或进程中断不自动重发付费模型请求。
 
 ## 4. 对接蒸馏系统
 

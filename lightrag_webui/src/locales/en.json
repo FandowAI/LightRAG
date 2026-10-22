@@ -779,7 +779,7 @@
       "queued": "Waiting",
       "running": "Working",
       "completed": "Batch complete",
-      "completed_with_errors": "Batch ended with failures or sources needing review",
+      "completed_with_errors": "Batch ended with retrieval failures",
       "cancelled": "Stopped; complete packages retained",
       "interrupted": "Interrupted; complete packages retained"
     },
@@ -796,11 +796,8 @@
     "deduplicated": "{{count}} duplicate passages removed across packages; {{skipped}} fully repeated centers skipped",
     "phase": {
       "retrieving": "Retrieving: {{done}} / {{total}} centers",
-      "selecting": "Selecting relevant topics: {{done}} / {{total}} sources",
-      "packaging": "Assigning and saving packages: {{done}} / {{total}}"
+      "packaging": "Deduplicating and saving: {{done}} / {{total}} centers"
     },
-    "review_pending": "{{count}} sources need review and were excluded from packages.",
-    "filtered": "{{count}} centers have no topics passing selection.",
     "saved_path": "Saved to: "
   },
   "folderUpload": {

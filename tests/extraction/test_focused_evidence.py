@@ -18,6 +18,10 @@ from lightrag.focused_evidence import (
 pytestmark = [pytest.mark.offline, pytest.mark.asyncio]
 
 
+def legacy_manager(*args, **kwargs):
+    return BatchManager(*args, focus=True, **kwargs)
+
+
 async def test_model_selector_does_not_accept_repaired_truncated_json():
     seen = {}
 
@@ -195,7 +199,7 @@ async def test_focused_production_pipeline_selects_once_and_never_falls_back_to_
             [u["id"] for u in payload["units"][:2]],
         )
 
-    manager = BatchManager(
+    manager = legacy_manager(
         SimpleNamespace(tokenizer=SimpleNamespace(encode=list)),
         root=tmp_path,
         retrieve=retrieve,
@@ -221,7 +225,7 @@ async def test_failed_judgment_is_visible_and_does_not_export_unfiltered_evidenc
     async def invalid(payload):
         return {"topics": [{"unit_ids": ["invented"]}]}
 
-    manager = BatchManager(
+    manager = legacy_manager(
         SimpleNamespace(tokenizer=SimpleNamespace(encode=list)),
         root=tmp_path,
         retrieve=retrieve,
@@ -249,7 +253,7 @@ async def test_stop_during_selection_keeps_audit_without_publishing_half_selecte
         await gate.wait()
         return response(payload["units"], payload["centers"])
 
-    manager = BatchManager(
+    manager = legacy_manager(
         SimpleNamespace(tokenizer=SimpleNamespace(encode=list)),
         root=tmp_path,
         retrieve=retrieve,
@@ -287,7 +291,7 @@ async def test_selection_never_changes_the_existing_shared_role_limit_on_failure
             options["max_async"]
         ),
     )
-    manager = BatchManager(rag, root=tmp_path, retrieve=retrieve, selector=invalid)
+    manager = legacy_manager(rag, root=tmp_path, retrieve=retrieve, selector=invalid)
     job = await manager.start(["supply"], PackageSettings())
     await asyncio.gather(*list(manager.tasks))
     assert manager.get(job["id"])["status"] == "completed_with_errors"
@@ -345,7 +349,7 @@ async def test_rebuild_creates_new_packages_without_changing_old_job_or_repeatin
         calls.append(payload)
         return response(payload["units"], payload["centers"])
 
-    manager = BatchManager(
+    manager = legacy_manager(
         SimpleNamespace(tokenizer=SimpleNamespace(encode=list)),
         root=tmp_path,
         retrieve=retrieve,

@@ -81,7 +81,9 @@ async def test_near_duplicate_requires_positive_equivalence_and_keeps_changed_nu
             "quotes": {"left": a["content"][:30], "right": b["content"][:30]},
         }
 
-    cleaned = await deduplicate_result(second, [first], PackageSettings(), len, approve)
+    cleaned = await deduplicate_result(
+        second, [first], PackageSettings(near_threshold=0.92), len, approve
+    )
     assert not cleaned["packages"]
     assert cleaned["shared_evidence"][0]["reason"] == "near_duplicate"
     changed = await result("c", {"three": left + " budget 200 dollars"})

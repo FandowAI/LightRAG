@@ -22,9 +22,9 @@ from lightrag.utils import GRAPH_FIELD_SEP, make_relation_chunk_key
 @dataclass(frozen=True)
 class PackageSettings:
     graph_depth: int = 2
-    rag_top_k: int = 30
+    rag_top_k: int = 10
     near_dedup: bool = True
-    near_threshold: float = 0.92
+    near_threshold: float = 0.995
 
     def validate(self):
         if (
@@ -407,11 +407,25 @@ async def assemble(
     }
 
 
-def equivalence_judge(rag):
+def equivalence_judge(rag, max_checks=None):
     """Use the existing extraction model for conservative information checks."""
     from lightrag.utils import tolerant_load_json_dict
 
+    limit = (
+        int(os.getenv("LIGHTRAG_DEDUP_MAX_LLM_CHECKS", "2"))
+        if max_checks is None
+        else max_checks
+    )
+    if not 0 <= limit <= 20:
+        raise ValueError("Dedup confirmation budget must be between 0 and 20")
+    calls = 0
+
     async def judge(left, right):
+        nonlocal calls
+        if calls >= limit:
+            return {"equivalent": False, "reason": "confirmation_budget_exhausted"}
+        calls += 1
+        judge.llm_calls = calls
         options = {}
         config = (
             rag.get_llm_role_config("extract")
@@ -436,10 +450,13 @@ def equivalence_judge(rag):
         )
         return tolerant_load_json_dict(raw)
 
+    judge.llm_calls = 0
     return judge
 
 
-async def from_rag(rag, center, settings, *, relation_evidence_only=False):
+async def from_rag(
+    rag, center, settings, *, relation_evidence_only=False, equivalence_checker=None
+):
     """Adapt the shared graph-mode DFS, then add vector candidates and evidence gates.
 
     No graph-wide scan or second graph writer is created. Training exports refuse
@@ -528,7 +545,9 @@ async def from_rag(rag, center, settings, *, relation_evidence_only=False):
         hits,
         settings,
         lambda text: len(rag.tokenizer.encode(text)),
-        equivalence_judge(rag) if settings.near_dedup else None,
+        (equivalence_checker or equivalence_judge(rag))
+        if settings.near_dedup
+        else None,
         relation_evidence_only=relation_evidence_only,
     )
     result["retrieval_adapter"] = "graph_mode_dfs_mix_v1"

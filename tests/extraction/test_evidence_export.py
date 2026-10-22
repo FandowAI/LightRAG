@@ -62,6 +62,7 @@ async def run_batch(tmp_path):
     manager = BatchManager(
         SimpleNamespace(tokenizer=SimpleNamespace(encode=list), workspace="enterprise"),
         root=tmp_path,
+        focus=True,
         retrieve=retrieve,
         selector=select,
     )

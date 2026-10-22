@@ -99,7 +99,7 @@ async def test_three_hops_form_one_package_with_all_entities():
 
 
 @pytest.mark.asyncio
-async def test_rag_top_thirty_is_separate_from_graph_coverage():
+async def test_vector_top_k_is_separate_from_graph_coverage():
     nodes, edges, chunks = graph([("a", "b")])
     chunks.update({f"v{i}": chunk(f"v{i}") for i in range(35)})
     result = await assemble(
@@ -110,7 +110,7 @@ async def test_rag_top_thirty_is_separate_from_graph_coverage():
         {},
         {},
         [{"id": f"v{i}"} for i in range(35)],
-        PackageSettings(near_dedup=False),
+        PackageSettings(rag_top_k=30, near_dedup=False),
         len,
     )
     seen = {
@@ -256,7 +256,9 @@ async def test_equivalent_near_duplicates_merge_but_original_variants_remain():
     left = record("one", "公司应先完成流程梳理，再逐步推进信息化。" * 8)
     right = record("two", "公司应先完成流程梳理，再逐步推进信息化！" * 8)
     judge = AsyncMock(side_effect=approval)
-    kept, audit = await deduplicate([left, right], PackageSettings(), judge)
+    kept, audit = await deduplicate(
+        [left, right], PackageSettings(near_threshold=0.92), judge
+    )
     assert len(kept) == 1 and audit[0]["action"] == "merged"
     assert {p["chunk_id"] for p in kept[0]["provenance"]} == {"one", "two"}
     assert kept[0]["variants"][0]["content"] == right["content"]
@@ -294,7 +296,9 @@ async def test_high_similarity_does_not_override_unique_information():
     judge = AsyncMock(
         return_value={"equivalent": False, "reason": "Extra approval requirement"}
     )
-    kept, audit = await deduplicate([left, right], PackageSettings(), judge)
+    kept, audit = await deduplicate(
+        [left, right], PackageSettings(near_threshold=0.92), judge
+    )
     assert len(kept) == 2 and audit[0]["action"] == "kept"
 
 
@@ -304,7 +308,7 @@ async def test_judge_failure_keeps_both_and_reports_failure():
     right = record("two", left["content"].replace("。", "！"))
     kept, audit = await deduplicate(
         [left, right],
-        PackageSettings(),
+        PackageSettings(near_threshold=0.92),
         AsyncMock(side_effect=RuntimeError("provider")),
     )
     assert len(kept) == 2 and audit[0]["reason"] == "equivalence_check_failed"
@@ -363,7 +367,7 @@ async def test_live_adapter_uses_completed_documents_only_and_complete_anchor_ch
         for s in c["provenance"]
     }
     assert ids == {"ca", "cb", "extra"}
-    rag.chunks_vdb.query.assert_awaited_once_with("a", top_k=30)
+    rag.chunks_vdb.query.assert_awaited_once_with("a", top_k=10)
     rag.role_llm_funcs["extract"].assert_not_awaited()
 
 

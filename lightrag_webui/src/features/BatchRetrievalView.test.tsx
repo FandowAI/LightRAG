@@ -12,7 +12,7 @@ afterEach(() => { cleanup(); mock.restore(); sessionStorage.clear() })
 const job: api.BatchJob = {
   id: 'test-batch', status: 'completed', total: 1, processed: 1, failed: 0, empty: 0,
   package_count: 1, current_center: null, cancel_requested: false,
-  settings: { graph_depth: 2, rag_top_k: 30 }, handoff: { status: 'not_submitted' },
+  settings: { graph_depth: 2, rag_top_k: 10 }, handoff: { status: 'not_submitted' },
   items: [{ center: '产品供应部', status: 'completed', packages: 1 }]
 }
 
@@ -67,10 +67,10 @@ describe('minimal batch retrieval', () => {
     fireEvent.click(view.getByRole('button', { name: 'Set selected centers and enter retrieval' }))
     expect(start).not.toHaveBeenCalled()
     expect((view.getByLabelText('Graph depth') as HTMLInputElement).value).toBe('2')
-    expect((view.getByLabelText('Vector candidate chunks') as HTMLInputElement).value).toBe('30')
+    expect((view.getByLabelText('Vector candidate chunks') as HTMLInputElement).value).toBe('10')
     fireEvent.submit(view.getByRole('form', { name: 'Start batch retrieval' }))
     await waitFor(() => expect(start).toHaveBeenCalledTimes(1))
-    expect(start.mock.calls[0][0]).toEqual({ centers: ['产品供应部'], graph_depth: 2, rag_top_k: 30 })
+    expect(start.mock.calls[0][0]).toEqual({ centers: ['产品供应部'], graph_depth: 2, rag_top_k: 10 })
     await waitFor(() => expect(view.getByText('1 package ready')).toBeTruthy())
     expect(view.getByRole('progressbar').getAttribute('value')).toBe('1')
     expect(view.getByRole('button', { name: 'Send batch to distillation' }).hasAttribute('disabled')).toBe(true)
@@ -103,16 +103,16 @@ describe('minimal batch retrieval', () => {
     expect(view.queryAllByText(/retrieval failed/i)).toHaveLength(0)
   })
 
-  test('shows actual selection-stage progress and retained review items', async () => {
+  test('shows retrieval progress without a source review step', async () => {
     restore()
     spyOn(api, 'getBatchConfig').mockResolvedValue({ distillation_configured: false })
-    spyOn(api, 'getBatchRetrieval').mockResolvedValue({ ...job, status: 'running', processed: 0, package_count: 0,
-      phase: 'selecting', phase_done: 2, phase_total: 8, review_pending: 1 })
+    spyOn(api, 'getBatchRetrieval').mockResolvedValue({ ...job, status: 'running', processed: 2, total: 4, package_count: 2,
+      phase: 'retrieving', phase_done: 2, phase_total: 4, review_pending: 1 })
     const view = renderWithProviders(<BatchRetrievalView />)
-    await waitFor(() => expect(view.getByText('Selecting relevant topics: 2 / 8 sources')).toBeTruthy())
+    await waitFor(() => expect(view.getByText('Retrieving: 2 / 4 centers')).toBeTruthy())
     expect(view.getByRole('progressbar').getAttribute('value')).toBe('2')
-    expect(view.getByRole('progressbar').getAttribute('max')).toBe('8')
-    expect(view.getByText('1 sources need review and were excluded from packages.')).toBeTruthy()
+    expect(view.getByRole('progressbar').getAttribute('max')).toBe('4')
+    expect(view.queryAllByText(/need review|relevant topics/i)).toHaveLength(0)
   })
 
   test('shows the server export path after publication', async () => {

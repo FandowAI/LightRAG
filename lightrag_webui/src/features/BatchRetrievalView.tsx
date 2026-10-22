@@ -11,7 +11,7 @@ export default function BatchRetrievalView() {
   const [thresholds, setThresholds] = useState({ min_neighbors: 3, min_documents: 2 })
   const [candidates, setCandidates] = useState<EntityCenterCandidate[] | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [settings, setSettings] = useState({ graph_depth: 2, rag_top_k: 30 })
+  const [settings, setSettings] = useState({ graph_depth: 2, rag_top_k: 10 })
   const [centers, setCenters] = useState<string[]>([])
   const [finding, setFinding] = useState(false)
   const [candidateError, setCandidateError] = useState(false)
@@ -124,8 +124,6 @@ export default function BatchRetrievalView() {
           </div>
           <progress aria-label={t('batch.progress_label')} value={active && batch.job.phase ? batch.job.phase_done || 0 : batch.job.processed} max={active && batch.job.phase ? Math.max(batch.job.phase_total || 0, 1) : batch.job.total} className="h-2 w-full accent-emerald-500" />
           {!!batch.job.duplicate_chunks && <p className="text-sm text-muted-foreground">{t('batch.deduplicated', { count: batch.job.duplicate_chunks, skipped: batch.job.skipped || 0 })}</p>}
-          {!!batch.job.review_pending && <p role="status" className="text-sm text-muted-foreground">{t('batch.review_pending', { count: batch.job.review_pending })}</p>}
-          {!!batch.job.filtered && <p className="text-sm text-muted-foreground">{t('batch.filtered', { count: batch.job.filtered })}</p>}
           <p className="text-sm text-muted-foreground">{active
             ? batch.job.cancel_requested ? t('batch.wait_stop') : batch.job.phase
               ? t(`batch.phase.${batch.job.phase}`, { done: batch.job.phase_done || 0, total: batch.job.phase_total || 0 })

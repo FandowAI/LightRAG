@@ -77,6 +77,23 @@ has already passed.
 
 ## Delivery boundary
 
+### Direct retrieval update — 2026-10-22
+
+New batches now run retrieval, within-package/cross-package deduplication and
+JSONL export directly. They do not run topic selection or hold sources for
+review. Uncertain duplicate judgments retain both originals. Defaults are graph
+depth 2, vector top-k 10 and near-duplicate similarity 0.995; the entire batch
+shares a budget of at most two model confirmations.
+
+Validation for this update: 71 targeted backend tests and all 671 frontend tests
+passed; TypeScript, Python lint and production build passed. Frontend lint has
+zero errors and the existing ThemeProvider fast-refresh warning. The earlier
+broader regression results above describe the previous integration snapshot.
+No new real-data batch was run for this update, at the user's request.
+
+Local analysis folders, runtime databases, logs, private model configuration,
+data and generated frontend files are excluded from the source commit.
+
 See [H200 deployment](../../deploy/h200/README.md) for installation, systemd,
 configuration, authentication and the evidence schema.
 

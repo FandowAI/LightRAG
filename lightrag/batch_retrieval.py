@@ -48,7 +48,7 @@ class ModelUnavailable(Exception):
 
 
 class BatchManager:
-    def __init__(self, rag, root=None, retrieve=None, *, focus=True, selector=None):
+    def __init__(self, rag, root=None, retrieve=None, *, focus=False, selector=None):
         self.rag = rag
         workspace = getattr(rag, "workspace", "")
         if (
@@ -193,12 +193,12 @@ class BatchManager:
                 "empty": 0,
                 "package_count": 0,
                 "duplicate_chunks": 0,
+                "dedup_llm_calls": 0,
                 "skipped": 0,
-                "filtered": 0,
-                "review_pending": 0,
+                **({"filtered": 0, "review_pending": 0} if self.focus else {}),
                 "policy": "focused_topics_relevance_v1"
                 if self.focus
-                else "legacy_first_committed_v1",
+                else "retrieval_dedup_v2",
                 "current_center": None,
                 "cancel_requested": False,
                 "handoff": {"status": "not_submitted"},
@@ -252,6 +252,10 @@ class BatchManager:
         )
 
     async def resume(self, job_id):
+        if not self.focus:
+            raise BatchConflict(
+                "Topic selection was removed; start a new retrieval batch"
+            )
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             job = self._read(db, job_id)
@@ -305,21 +309,43 @@ class BatchManager:
     async def _run(self, job_id, settings):
         try:
             previous = []
-            self.update(job_id, lambda job: job.update(status="running"))
+            judge = (
+                equivalence_judge(self.rag)
+                if settings.near_dedup and getattr(self.rag, "role_llm_funcs", None)
+                else None
+            )
+            self.update(
+                job_id,
+                lambda job: job.update(
+                    status="running",
+                    phase="retrieving",
+                    phase_done=0,
+                    phase_total=job["total"],
+                ),
+            )
             for index, item in enumerate(self.get(job_id)["items"]):
                 if self.get(job_id)["cancel_requested"]:
                     break
                 center = item["center"]
 
                 def begin(job):
-                    job["current_center"] = center
+                    job.update(current_center=center, phase="retrieving")
                     job["items"][index]["status"] = "running"
 
                 self.update(job_id, begin)
                 try:
-                    result = await asyncio.wait_for(
-                        self.retrieve(self.rag, center, settings), timeout=600
+                    call = (
+                        self.retrieve(
+                            self.rag,
+                            center,
+                            settings,
+                            relation_evidence_only=True,
+                            equivalence_checker=judge,
+                        )
+                        if self.retrieve is from_rag
+                        else self.retrieve(self.rag, center, settings)
                     )
+                    result = await asyncio.wait_for(call, timeout=600)
                     packages = result["packages"]
                     if not isinstance(packages, list) or len(packages) > 1:
                         raise ValueError(
@@ -336,16 +362,23 @@ class BatchManager:
                             or not record["text"].strip()
                         ):
                             raise ValueError("Adapter returned an empty source record")
+                        # Preserve every original before any cross-package removal.
+                        candidate = self.root / job_id / f"candidate-{index:04d}.json"
+                        temporary = candidate.with_suffix(".tmp")
+                        await asyncio.to_thread(
+                            temporary.write_text,
+                            json.dumps(result, ensure_ascii=False),
+                            encoding="utf-8",
+                        )
+                        temporary.replace(candidate)
+                        self.update(job_id, lambda j: j.update(phase="packaging"))
                         result = await asyncio.wait_for(
                             deduplicate_result(
                                 result,
                                 previous,
                                 settings,
                                 lambda text: len(self.rag.tokenizer.encode(text)),
-                                equivalence_judge(self.rag)
-                                if settings.near_dedup
-                                and getattr(self.rag, "role_llm_funcs", None)
-                                else None,
+                                judge,
                             ),
                             timeout=600,
                         )
@@ -380,6 +413,8 @@ class BatchManager:
                     if error:
                         row["error_type"] = error
                     job["processed"] += 1
+                    job["phase_done"] = job["processed"]
+                    job["dedup_llm_calls"] = getattr(judge, "llm_calls", 0)
                     job["package_count"] += len(packages)
                     job["failed"] += int(state == "failed")
                     job["empty"] += int(state == "empty")
@@ -399,7 +434,9 @@ class BatchManager:
                     if job["failed"]
                     else "completed"
                 )
-                job.update(status=status, current_center=None, finished_at=now())
+                job.update(
+                    status=status, phase=None, current_center=None, finished_at=now()
+                )
 
             export_path = await asyncio.to_thread(self.persist_export, job_id)
             self.update(job_id, lambda j: j.update(export_path=export_path))

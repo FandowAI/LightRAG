@@ -34,7 +34,7 @@ def test_defaults_match_agreed_package_policy(client):
     assert response.status_code == 200
     _, name, settings = build.call_args.args
     assert name == "产品供应部"
-    assert (settings.graph_depth, settings.rag_top_k) == (2, 30)
+    assert (settings.graph_depth, settings.rag_top_k) == (2, 10)
     assert not hasattr(settings, "max_entities")
     assert not hasattr(settings, "max_tokens")
     assert settings.near_dedup is True

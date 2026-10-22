@@ -1,8 +1,9 @@
-# Focused evidence for batch retrieval
+# Historical focused evidence executor
 
-Production batches use two-hop graph retrieval plus thirty vector candidates,
-then source-grounded topic selection and relevance-based ownership. Standalone
-query/testing endpoints retain their behavior. No graph/corpus writes occur.
+**Historical implementation only.** Normal production batches no longer run this
+executor or its source-selection/review step. Current behavior is documented in
+[BatchRetrieval.md](BatchRetrieval.md). Old snapshots are retained, and the
+production API refuses resuming their removed topic-selection phase.
 
 ## Candidate scope
 

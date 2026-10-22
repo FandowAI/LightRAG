@@ -1,89 +1,93 @@
 # Batch evidence retrieval
 
-The original WebUI **批量检索** page contains selection, explicit start,
-progress and distillation handoff. The ordinary retrieval tab retains normal
-query settings, chat and testing; the prompt admin tab is also preserved.
+The original **批量检索** page contains center selection, explicit retrieval,
+progress, package counts and handoff. Ordinary query testing and prompt
+administration are preserved.
 
-## Retrieval integration
+## Current flow
+
+1. Select core entities using neighbor/document thresholds.
+2. Retrieve the center, graph-path evidence and vector candidates.
+3. Deduplicate within each package and across this batch.
+4. Save entities, relationships and original text to the JSONL delivery files.
+
+There is no topic/relevance model, source-review queue, or review gate. Every
+successfully retrieved original enters deduplication and packaging, including
+unclear transcripts and mixed business topics. Originals are never rewritten.
+Only confirmed duplicate evidence is removed from teacher text. The original
+variants and provenance remain in the audit/source archive.
+
+Depth defaults to 2; ordinary vector candidates now default to 10 (previously
+30) and remain editable. This value bounds VECTOR candidates, not the total
+number of graph-source chunks. Graph evidence is retrieved independently; a
+complete recalled block is never silently cut into selected topics. Neighbor
+entities contribute relationship/path evidence, not their entire unrelated
+lifetime document collection.
+
+## Retrieval implementation
 
 The colleague's `feat/add_graph_query_mode` commit
-`69fd530d43f76c21b78b1b60c4f041339e948906` is merged, preserving graph-mode
-queries, `/query/data/batch`, DFS traversal, tracking-row precedence, depth
-0–5 and its 100-node/200-relation caps.
+`69fd530d43f76c21b78b1b60c4f041339e948906` remains merged. The evidence adapter
+reuses its `_traverse_graph_from_entity` DFS. Interactive query/data/batch and
+its branch-barrier options retain their behavior and 100-node/200-relation
+default caps. Evidence jobs explicitly pass their own configurable safety caps
+(default 10,000 nodes / 20,000 relations). A capped evidence traversal raises;
+it is never passed off as a complete package. No second graph writer or
+per-center full-graph scan is created. Only processed source documents are used.
 
-`entity_packages.from_rag` adapts the shared `_traverse_graph_from_entity`
-implementation rather than scanning every graph node for each center. It adds
-vector candidates (default 30), processed-document gates, grounded topic
-selection and batch-wide text deduplication. The initial center is an exact
-entity name; no question-generation step is needed. Default depth is 2.
-Batch jobs explicitly pass separately configurable safety caps (10,000 nodes /
-20,000 relations by default; `LIGHTRAG_BATCH_MAX_GRAPH_NODES` and
-`LIGHTRAG_BATCH_MAX_GRAPH_RELATIONS`) into that same traversal helper.
-A capped graph is rejected for training packaging rather than silently
-exported as a complete neighborhood. Interactive graph queries retain the
-colleague's existing truncation metadata behavior.
+## Deduplication and model cost
 
-The colleague's ordered branch-barrier dedup remains available in the original
-batch API. Production evidence jobs independently retrieve each center so shared
-passages can be assigned to the most relevant center before packaging, rather
-than deleted according to request order. Graph edges remain contextual indexes;
-only source text selected for a center enters its teacher text. See
-[FocusedEvidence.md](FocusedEvidence.md) for relevance and literal-span rules.
+- Identical source IDs/text and whitespace-normalized copies use local rules.
+- Near candidates must meet 0.995 lexical similarity, plus matching date,
+  number/unit, negation and condition guards, before any model confirmation.
+- One confirmation function is shared by retrieval and cross-package dedup for
+  the WHOLE batch. `LIGHTRAG_DEDUP_MAX_LLM_CHECKS` defaults to 2; zero disables
+  model confirmations. The budget cannot be reset per center or package.
+- A successful confirmation requires full information equivalence and exact
+  supporting quotes. Merely related text cannot be merged.
+- Failure, uncertainty or an exhausted budget keeps both texts and continues.
+  No source waits for human review. `dedup_llm_calls` reports actual model calls.
 
-Core selection currently supports at most 10,000 nodes and reads the graph and
-tracking anchors once per selection request. It is not an unbounded graph-wide
-analytics service. The browser exposes only neighbor/document thresholds,
-then depth/vector count, followed by actual phase progress and package counts.
+The first successfully committed package owns shared text. Later centers keep
+references; exports/handoff never re-expand repeated text. Failed/uncommitted
+packages cannot suppress later evidence. Fully repeated centers are skipped as
+duplicates rather than failed, with related centers linked from their owner.
+The assignment is deterministic for the selected order, not an AI relevance
+judgment. Source differences in time, numbers, conditions and conclusions stay.
 
-## Durable jobs and files
+## Durability, export and API
 
-A workspace-local SQLite ledger allows one active batch. Retrieval runs against
-the server's initialized RAG instance without creating another graph writer.
-The selector uses four bounded workers and the existing role wrapper; it never
-raises the shared extraction-role limit or changes operator model settings.
-Failed/uncertain selection is retained for review, not copied into teacher data.
+Jobs use a workspace-local SQLite ledger and the initialized server RAG instance.
+One active batch is allowed per workspace. The UI shows real per-center retrieval
+and dedup/save progress; package counts increment after atomic saves. Failed
+retrieval is a technical failure, not a content-review decision. Stopping retains
+completed packages and snapshots; no restart automatically repeats paid calls.
 
-`LIGHTRAG_BATCH_OUTPUT_DIR` is an optional persistent root. A job lives at
-`<root>/<workspace-or-default>/<batch_id>/`. Without it, the compatible fallback
-is `<working_dir>/<workspace>/batch_retrieval/<batch_id>/`.
-The H200 template configures `/data/fando/lightrag/exports/enterprise/`.
+The production policy is `retrieval_dedup_v2`. Historical focused snapshots are
+retained for audit, but the normal server refuses resuming their removed source
+selection stage. Start a new batch to use current behavior; old files are not
+silently rewritten.
 
-Each terminal successful batch publishes `packages.jsonl`, `sources.jsonl` and
-`manifest.json`. The API returns the absolute `export_path`; the UI displays it.
-Each package contains entities, relationships, literal original passages,
-provenance, shared-evidence references and SourceRecord-compatible text/metadata.
-Full original chunks are stored once in the source archive. Manifest row counts
-and hashes must be checked by consumers before import. See
-[H200 deployment](../../deploy/h200/README.md) for paths, schema and rollout.
+`LIGHTRAG_BATCH_OUTPUT_DIR` sets the persistent output root. The H200 template
+uses `/data/fando/lightrag/exports/enterprise/<batch_id>/` containing:
 
-Per-center/audit JSON remains on disk. Files are atomically replaced before
-completion is reported. A crash may leave an uncounted file or incomplete export;
-only a manifest-validated export is deliverable. Dead PID plus process-birth
-checks mark jobs interrupted. No restart automatically repeats paid retrieval.
-Explicit resume requires zero published packages; packaging-only rebuild creates
-a new job and preserves old outputs. Old pilot jobs without source snapshots
-must be rerun before creating production source-verified exports.
+- `packages.jsonl`: one record per nonempty unique package, with entities,
+  relationships, original text, sources and duplicate ownership references.
+- `sources.jsonl`: full original chunks, stored once by ID across the batch.
+- `manifest.json`: format version, file row counts and SHA-256 checksums.
+- `candidate-NNNN.json` and `entity-NNNN.json`: recalled originals and dedup audit.
 
-## Authenticated API
+The API returns an absolute `export_path`, shown on the page. Original existence,
+relationship endpoints and literal offsets are checked before publication.
+Graph descriptions are contextual indexes, not substitutes for source facts.
+See [H200 deployment](../../deploy/h200/README.md) for deployment and schema.
 
-- `GET /batch-retrieval/config`: adapter ID and handoff availability; no secrets.
-- `POST /batch-retrieval/jobs`: centers, graph depth, vector count; returns 202.
-- `GET /batch-retrieval/jobs/{id}`: real phase/progress/outcomes/export path.
-- `POST /batch-retrieval/jobs/{id}/stop`: stops after in-flight calls settle.
-- `POST /batch-retrieval/jobs/{id}/resume`: explicit preparation recovery.
-- `POST /batch-retrieval/jobs/{id}/rebuild`: new job from a frozen snapshot.
-- `GET /batch-retrieval/jobs/{id}/packages.jsonl`: terminal package records.
-- `GET /batch-retrieval/jobs/{id}/sources.jsonl`: shared full original chunks.
-- `GET /batch-retrieval/jobs/{id}/manifest.json`: delivery hashes and row counts.
-- `POST /batch-retrieval/jobs/{id}/distill`: explicit acknowledged handoff.
+Authenticated routes remain under `/batch-retrieval`: `config`, `jobs`,
+`jobs/{id}`, `jobs/{id}/stop`, the three artifact filenames, and `jobs/{id}/distill`.
+Active or unpublished artifact requests return 409. Batches are workspace-shared
+resources using the existing auth boundary, not a separate per-user ACL.
 
-All routes reuse current API authentication and workspace isolation; workspaces
-are shared resources, not a new per-user access-control system. Active export
-requests return 409. Errors expose types, not private provider response bodies.
-
-Handoff is disabled until `DISTILLATION_INGEST_URL` is set. Optional Bearer key
-is server-side only. The receiver must accept `{batch_id, records}`, honor
-`Idempotency-Key: lightrag-<batch_id>`, and return `accepted:true`. A lost receipt
-is unconfirmed; explicit retry uses the same key. The HTTP adapter does not
-transfer `sources.jsonl`; shared storage or an agreed file-transfer channel is
-required. Keep it unconfigured until that integration contract is confirmed.
+Handoff stays disabled until `DISTILLATION_INGEST_URL` is configured. The receiver
+must honor `Idempotency-Key: lightrag-<batch_id>` and explicitly acknowledge
+`accepted:true`. The HTTP adapter sends `{batch_id, records}`; the source archive
+requires agreed shared storage/file transfer. No acknowledgement is simulated.

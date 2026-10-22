@@ -777,7 +777,7 @@
       "queued": "等待开始",
       "running": "正在处理",
       "completed": "本批次已完成",
-      "completed_with_errors": "本批次已结束，有失败或待复核内容",
+      "completed_with_errors": "本批次已结束，部分实体检索失败",
       "cancelled": "已停止，已形成的包已保留",
       "interrupted": "任务已中断，已形成的包已保留"
     },
@@ -794,11 +794,8 @@
     "deduplicated": "跨包已去重 {{count}} 块原文 · {{skipped}} 个中心内容全部重复已跳过",
     "phase": {
       "retrieving": "正在召回：{{done}} / {{total}} 个中心",
-      "selecting": "正在筛选相关议题：{{done}} / {{total}} 份原文",
-      "packaging": "正在分配并形成资料包：{{done}} / {{total}}"
+      "packaging": "正在去重并保存资料包：{{done}} / {{total}} 个中心"
     },
-    "review_pending": "{{count}} 份原文待复核，暂未进入资料包。",
-    "filtered": "{{count}} 个中心暂无通过筛选的议题。",
     "saved_path": "保存位置："
   },
   "folderUpload": {
