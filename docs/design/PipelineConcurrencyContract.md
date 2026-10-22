@@ -39,4 +39,25 @@ Mutual-exclusion rules (all checked atomically inside the lock):
 
 The contract permits **concurrent enqueue + processing**: a freshly-uploaded doc lands in `doc_status` while the loop is mid-batch, its document message is routed into the running batch by the in-batch feeder (or resolved at the batch boundary by the quiescence decision), and the doc processes without waiting for a new run.
 
+## Post-parse content deduplication
+
+Post-parse duplicate marking takes the workspace `content_hash_dedup` keyed lock
+for the content hash, then the existing source-candidate lock. Different source
+names therefore cannot commit reciprocal duplicate pointers from stale reads.
+The lookup is repeated under both locks. Among unprocessed twins the earliest
+`(created_at, id)` remains primary; an already analyzing/processing/processed
+holder is retained so existing graph attribution is never discarded.
+Ordinary duplicates finish as `SKIPPED`, without graph contributions or automatic
+retry. An unresolved filename conflict remains `FAILED` and requires repair.
+Legacy duplicate rows are migrated only while the local service is stopped.
+Cycles are repaired by restoring one source per group as `PENDING`, preserving
+the other rows as skipped aliases. Status/full-doc snapshots are backed up first;
+an interrupted recovery can be repeated before the service resumes.
+
+`LIGHTRAG_RECOVERY_DOC_IDS` optionally selects up to 32 restored documents for
+a bounded first batch. They are hydrated strictly by id, excluding journaled
+and terminal rows. Returning `CURSOR_START` preserves the ordinary immutable
+keyset sweep: after the recovery batch is terminal, the normal backlog resumes.
+The local recovery tool stores this bounded list beside its backup report.
+
 For the rest — write ordering of `full_docs` vs `doc_status`, the workspace-scoped `enqueue_serialize` lock around dedup-and-upsert, and the `from_scan=True` bypass — see the docstrings on `apipeline_enqueue_documents` and `apipeline_process_enqueue_documents` in `lightrag/pipeline.py`.

@@ -796,7 +796,7 @@ File enqueue and extraction results are written into `full_docs`:
 - When parsing fails, the original file is not moved, making it easy to fix the configuration and re-process.
 - When `/documents/scan` encounters a file with the same name that is already `PROCESSED`, the input file is treated as already processed and moved to `__parsed__`, not enqueued as a new document.
 - When `/documents/scan` finds multiple files that share the same canonicalized name in the same scan, **the file that claims the canonical source key first wins** (i.e. whichever the streaming directory walk reaches first). A scan-wide UNIQUE claim in the disposable disk spool archives every later variant with a warning before any candidate is persisted. For example, if both `abc.docx` and `abc.[native].docx` exist, only the one reached first is processed. A hint selects the engine and no longer grants scheduling priority.
-- When duplicate content hashes are found during scanning or parsing, the input file is likewise moved to `__parsed__`; this `doc_status` entry is kept as `FAILED duplicate` for tracking.
+- When duplicate content hashes are found during scanning or parsing, the input file is likewise moved to `__parsed__`; this `doc_status` entry is kept as `SKIPPED duplicate` for tracking.
 - File moves only act on the current input file and do not overwrite or move existing document source files. If a file with the same name already exists at the destination, the system automatically appends `_001`, `_002`, etc., e.g., `report.pdf` is archived as `report_001.pdf`, `report_002.pdf`. If the analysis result directory name is already taken by a regular file, a number is also appended, e.g., `report.docx.parsed_001/`.
 
 ### 6.3 Raw Artifact Bundles (`<base>.*_raw/`)
@@ -865,7 +865,7 @@ Engine-specific conditions on top of that:
 
 ## 7. Same-name and Duplicate Documents
 
-Uploads, directory scans and the text endpoints all deduplicate. Ingesting the same content twice wastes LLM quota and creates duplicate entities in the knowledge graph, so LightRAG checks two rules — filename and content: hitting either marks the attempt a duplicate, records it as `FAILED`, and **never overwrites the existing document**. Every check completes **before** chunking, entity extraction and any graph write — but that is not the same as "before anything is stored": `native` / `mineru` / `docling` must persist a pending-parse record and then the parse result before a content hash exists at all, so that path briefly holds a record that is subsequently rolled back (see §7.1, §7.2).
+Uploads, directory scans and the text endpoints all deduplicate. Ingesting the same content twice wastes LLM quota and creates duplicate entities in the knowledge graph, so LightRAG checks filename and content: an ordinary duplicate finishes as `SKIPPED` and **never overwrites the existing document**. Its explanation is stored in `metadata.skip_reason`, with an empty `error_msg`. An unresolved filename conflict remains `FAILED` and requires repair. Every check completes **before** chunking, entity extraction and any graph write; parsers first persist a pending-parse record and a parse result before a content hash exists, so that path briefly holds a record that is subsequently rolled back (see §7.1, §7.2).
 
 ### 7.1 The Two Dedup Rules
 
@@ -886,7 +886,7 @@ Two additional rules:
 - **The text endpoints** (`/documents/text`, `/documents/texts`) must supply a valid `file_source`, whose basename is used for the name check; without one they return 400.
 - **Sourceless documents** (SDK `insert` / `ainsert` without `file_paths`, recorded as `file_path=unknown_source`) take no part in name dedup — `unknown_source` is only a placeholder, so two sourceless documents never collide on it — but they **are still deduplicated by content**: inserting the same text again is still a duplicate. The empty string and `no-file-path` behave the same way.
 
-Neither documents within one enqueue batch nor two concurrently issued enqueues can both slip past the check: the later one is always recognized as a duplicate and recorded as `FAILED`.
+Neither documents within one enqueue batch nor two concurrently issued enqueues can both slip past the check: the later one is recognized as a duplicate and recorded as `SKIPPED`. Post-parse checks serialize on the content hash before the source lock; unprocessed twins retain the earliest `(created_at, id)` primary, preventing reciprocal duplicate pointers.
 
 ### 7.2 What You Will See
 
@@ -894,14 +894,14 @@ Neither documents within one enqueue batch nor two concurrently issued enqueues 
 | --- | --- |
 | Upload returns 409 `Document storage already contains '<name>' (Status: …)` | `doc_status` already holds a record under that name (any status, including `FAILED`) |
 | Upload returns 409 `Input directory already contains a file with the same canonical basename …` | No record exists, but `INPUT_DIR` still holds a file with that name |
-| An extra `FAILED` row appears with `error_msg` `File name already exists. Original doc_id: …, Status: …` | A batch enqueue or a scan hit the filename rule |
-| `FAILED` with `error_msg` `Identical content already exists under another filename. Original doc_id: …` | The content rule was hit |
+| An extra `SKIPPED` row appears with `metadata.skip_reason` `File name already exists. Original doc_id: …, Status: …` | A batch enqueue or a scan hit the filename rule |
+| `SKIPPED` with `metadata.skip_reason` `Identical content already exists under another filename. Original doc_id: …` | The content rule was hit |
 | `FAILED` with `error_msg` `N existing documents already share this file name …` | A legacy "one filename, several primary records" conflict that has to be repaired by doc id first |
 
 The upload path is **fail-fast**: the first two cases return 409 outright, writing no file and leaving no trace in `doc_status`. The other three do leave a record in the document list, but **the records have different shapes** — do not go looking only for the `dup-` prefix:
 
-- **A duplicate caught at enqueue time** (same name, or a content hash that already exists on the `legacy` path): a new `FAILED` record with a doc id prefixed `dup-` is created, and the original document is untouched. Its `metadata` carries `duplicate_kind` (`filename` / `content_hash`), `original_doc_id` and `original_track_id`, naming the copy that was kept.
-- **A content duplicate found only after parsing** (`native` / `mineru` / `docling` have no content hash at enqueue time): **no** `dup-*` record is created. Instead this document's own `doc-*` record is flipped to `FAILED` in place with `metadata.is_duplicate=true` and `duplicate_kind=content_hash`, the `full_docs` row written for this attempt is deleted, and the source file is archived into `__parsed__`.
+- **A duplicate caught at enqueue time** (same name, or a content hash that already exists on the `legacy` path): a new `SKIPPED` record with a doc id prefixed `dup-` is created, and the original document is untouched. Its `metadata` carries `duplicate_kind` (`filename` / `content_hash`), `original_doc_id` and `original_track_id`, naming the copy that was kept.
+- **A content duplicate found only after parsing** (`native` / `mineru` / `docling` have no content hash at enqueue time): **no** `dup-*` record is created. Instead this document's own `doc-*` record becomes `SKIPPED` with `metadata.is_duplicate=true` and `duplicate_kind=content_hash`, the `full_docs` row written for this attempt is deleted, and the source file is archived into `__parsed__`.
 - **`filename_conflict`**: several primary records already share the filename and the system **deliberately does not pick a primary for you**, so `original_doc_id` on this record does not name "the copy that was kept" — repair the conflict first, per [§7.3](#73-what-to-do-about-it).
 
 ### 7.3 What To Do About It

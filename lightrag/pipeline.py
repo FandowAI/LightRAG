@@ -74,6 +74,7 @@ from lightrag.kg.shared_storage import (
     get_namespace_data,
     get_namespace_lock,
     get_pipeline_ingress,
+    get_storage_keyed_lock,
     make_manual_owner_record,
     reap_dead_reservations_locked,
     reservation_kind,
@@ -1466,7 +1467,9 @@ class _PipelineMixin:
                             f"{attempt.get('original_doc_id', doc_id)}"
                         )
                     duplicate_docs[dup_record_id] = {
-                        "status": DocStatus.FAILED,
+                        "status": DocStatus.FAILED
+                        if duplicate_kind == "filename_conflict"
+                        else DocStatus.SKIPPED,
                         "content_summary": summary,
                         "content_length": attempt.get("content_length", 0),
                         "chunks_count": 0,
@@ -1475,12 +1478,17 @@ class _PipelineMixin:
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                         "file_path": file_path,
                         "track_id": track_id,  # Use current track_id for tracking
-                        "error_msg": error_msg,
+                        "error_msg": error_msg
+                        if duplicate_kind == "filename_conflict"
+                        else None,
                         "metadata": {
                             "is_duplicate": True,
                             "duplicate_kind": duplicate_kind,
                             "original_doc_id": attempt.get("original_doc_id", doc_id),
                             "original_track_id": attempt.get("existing_track_id", ""),
+                            "skip_reason": error_msg
+                            if duplicate_kind != "filename_conflict"
+                            else "",
                         },
                     }
 
@@ -3655,6 +3663,21 @@ class _PipelineMixin:
         Either path drops rows carrying an unfinished custom-chunk journal — they
         are not routable work; see the comment on the filter below.
         """
+        # Offline recovery can request a bounded priority batch without changing
+        # immutable created_at keys or displacing the normal sweep cursor.
+        priority = get_env_value("LIGHTRAG_RECOVERY_DOC_IDS", "", str)
+        if priority and position is CURSOR_START:
+            ids = [key for key in priority.split(",") if key][:32]
+            records = await self.doc_status.get_docs_by_ids(ids, strict=True)
+            ids = [
+                key
+                for key in ids
+                if key in records
+                and records[key].status in statuses
+                and not records[key].has_custom_chunk_journal
+            ]
+            if ids:
+                return await self._hydrate_scheduling_page(ids, statuses), CURSOR_START
         page_size = getattr(self, "pipeline_scheduling_page_size", 0)
         if page_size <= 0:
             docs = await self.doc_status.get_docs_by_statuses(
@@ -5803,7 +5826,11 @@ class _PipelineMixin:
                     merge_stats = None
                     if not doc_process_opts.skip_kg:
                         merge_manager = getattr(self, "entity_merge", None)
-                        merge_func = merge_manager.merge if merge_manager else merge_nodes_and_edges
+                        merge_func = (
+                            merge_manager.merge
+                            if merge_manager
+                            else merge_nodes_and_edges
+                        )
                         merge_stats = await merge_func(
                             chunk_results=chunk_results,
                             knowledge_graph_inst=self.chunk_entity_relation_graph,
@@ -5867,7 +5894,11 @@ class _PipelineMixin:
                         metadata_extra={
                             "process_start_time": process_start_time,
                             "process_end_time": process_end_time,
-                            **({"entity_merge": merge_stats} if merge_stats is not None else {}),
+                            **(
+                                {"entity_merge": merge_stats}
+                                if merge_stats is not None
+                                else {}
+                            ),
                             **extraction_meta,
                             # Empty on a clean run, which is what CLEARS a
                             # previous attempt's summary: the key is not in the
@@ -6610,14 +6641,15 @@ class _PipelineMixin:
 
         Owner-checked like every other worker status write (LR2 §7.7 items 3/4):
         this one does not go through ``_upsert_doc_status_transition``, so it
-        verifies ownership itself before the FAILED-duplicate upsert.
+        verifies ownership itself before the SKIPPED-duplicate upsert.
 
         Marking this document a duplicate REMOVES it from the primary candidates
         of its canonical source, which makes this one of the writers LR2 §5.5
         requires a source-conflict commit to be mutually exclusive with. So the
         decision and the write happen together under
         :func:`source_candidate_set_lock` — the same keyed lock the repair holds —
-        and the match is re-read inside it. That is what linearizes the two
+        and the match is re-read inside it. A content-hash lock is taken first
+        to serialize twins with different source names. That linearizes the two
         operations instead of merely narrowing the window between them:
 
         * marking wins the lock → the repair then finds this document is no longer
@@ -6644,7 +6676,12 @@ class _PipelineMixin:
         if not match:
             return False
 
-        async with source_candidate_set_lock(self.workspace, file_path):
+        async with (
+            get_storage_keyed_lock(
+                [content_hash], namespace=f"{self.workspace}:content_hash_dedup"
+            ),
+            source_candidate_set_lock(self.workspace, file_path),
+        ):
             match = await get_duplicate_doc_by_content_hash(
                 self.doc_status, content_hash, doc_id
             )
@@ -6664,6 +6701,18 @@ class _PipelineMixin:
                 return False
 
             original_doc_id, original_doc = match
+            # Before either twin starts graph work, elect the earliest source.
+            # Excluding self from a lookup alone makes both concurrent parsers
+            # see the other twin; different source locks cannot serialize that.
+            original_status = doc_status_field(original_doc, "status", "unknown")
+            if original_status in {DocStatus.PENDING, DocStatus.PARSING} and (
+                str(status_doc.created_at),
+                doc_id,
+            ) < (
+                str(doc_status_field(original_doc, "created_at", "")),
+                original_doc_id,
+            ):
+                return False
             original_track_id = doc_status_field(original_doc, "track_id", "")
             original_status = doc_status_field(original_doc, "status", "unknown")
             now = datetime.now(timezone.utc).isoformat()
@@ -6675,7 +6724,7 @@ class _PipelineMixin:
             await self.doc_status.upsert(
                 {
                     doc_id: {
-                        "status": DocStatus.FAILED,
+                        "status": DocStatus.SKIPPED,
                         "content_summary": (
                             f"[DUPLICATE:content_hash] Original document: "
                             f"{original_doc_id}"
@@ -6688,12 +6737,13 @@ class _PipelineMixin:
                         "file_path": file_path,
                         "track_id": status_doc.track_id,
                         "content_hash": content_hash,
-                        "error_msg": message,
+                        "error_msg": None,
                         "metadata": doc_status_transition_metadata(
                             status_doc,
                             extra={
                                 "is_duplicate": True,
                                 "duplicate_kind": "content_hash",
+                                "skip_reason": message,
                                 "original_doc_id": original_doc_id,
                                 "original_track_id": original_track_id,
                             },

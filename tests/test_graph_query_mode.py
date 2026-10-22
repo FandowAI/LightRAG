@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+
 from lightrag.lightrag import LightRAG
 from lightrag.operate import (
     _graph_chunks,
@@ -13,6 +14,9 @@ from lightrag.operate import (
 from lightrag.base import QueryParam
 from lightrag.utils import make_relation_chunk_key
 from lightrag.utils import Tokenizer
+
+
+pytestmark = pytest.mark.offline
 
 
 class _Graph:
@@ -107,11 +111,7 @@ async def test_graph_chunks_prefer_tracking_and_deduplicate_stably():
         }
     )
     relation_chunks = _KV(
-        {
-            make_relation_chunk_key("A", "B"): {
-                "chunk_ids": ["shared", "tracked-ab"]
-            }
-        }
+        {make_relation_chunk_key("A", "B"): {"chunk_ids": ["shared", "tracked-ab"]}}
     )
     text_chunks = _KV(
         {
@@ -322,8 +322,7 @@ async def test_graph_batch_deduplicates_relations_in_input_order():
         "D",
     }
     assert {
-        (item["src_id"], item["tgt_id"])
-        for item in second["data"]["relationships"]
+        (item["src_id"], item["tgt_id"]) for item in second["data"]["relationships"]
     } == {("B", "C"), ("B", "D")}
     assert second["metadata"]["deduplicated_relationships"] == [
         make_relation_chunk_key("A", "B")

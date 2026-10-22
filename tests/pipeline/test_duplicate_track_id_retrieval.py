@@ -105,7 +105,7 @@ async def _assert_both_track_ids_resolve(
     )
     (dup_status,) = dup_docs.values()
     assert dup_status.track_id == dup_track_id
-    assert dup_status.status == DocStatus.FAILED
+    assert dup_status.status == DocStatus.SKIPPED
     assert dup_status.metadata.get("is_duplicate") is True
     assert dup_status.metadata.get("duplicate_kind") == dup_kind
     # The displaced original identity: without these the client reaches its own

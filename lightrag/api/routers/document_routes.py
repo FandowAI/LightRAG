@@ -44,6 +44,7 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
     HTTPException,
     Query,
     Request,
@@ -5228,6 +5229,7 @@ def create_document_routes(
         managed_tasks: set = Depends(get_managed_background_tasks),
         file: UploadFile = File(...),
         http_request: Request = None,
+        relative_path: Annotated[str, Form()] = "",
     ):
         """
         Upload a file to the input directory and index it.
@@ -5263,8 +5265,8 @@ def create_document_routes(
            - Returns `status="success"` with a new track_id immediately
            - The duplicate is detected later when processing the file content
            - Use `/documents/track_status/{track_id}` to check the final result:
-             - Document will have `status="FAILED"`
-             - `error_msg` contains "Content already exists. Original doc_id: xxx"
+             - Document will have `status="SKIPPED"`
+             - `metadata.skip_reason` explains which original document was kept
              - `metadata.is_duplicate=true` with reference to original document
              - `metadata.original_doc_id` points to the existing document
              - `metadata.original_track_id` shows the original upload's track_id
@@ -5325,6 +5327,19 @@ def create_document_routes(
 
             # Sanitize filename to prevent Path Traversal attacks
             safe_filename = sanitize_filename(file.filename, doc_manager.input_dir)
+            normalized_folder_path = ""
+            if relative_path:
+                from lightrag.folder_upload import folder_source_name
+
+                try:
+                    safe_filename, normalized_folder_path = folder_source_name(
+                        relative_path, safe_filename
+                    )
+                    safe_filename = sanitize_filename(
+                        safe_filename, doc_manager.input_dir
+                    )
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
 
             # Resolve engine + process options once and reuse the result for
             # both gates below; each resolution costs a hint parse plus a
@@ -5416,6 +5431,17 @@ def create_document_routes(
                         f"canonical basename ('{existing_input_file.name}'). "
                         f"Remove or rename it before re-uploading."
                     ),
+                )
+
+            if normalized_folder_path:
+                from lightrag.folder_upload import save_source_path
+
+                await asyncio.to_thread(
+                    save_source_path,
+                    rag.working_dir,
+                    rag.workspace,
+                    safe_filename,
+                    normalized_folder_path,
                 )
 
             # Async streaming write with size check
@@ -6050,7 +6076,11 @@ def create_document_routes(
                 rag.entity_chunks,
                 rag.relation_chunks,
                 rag.entities_vdb,
-                *([rag.entity_merge.name_vdb] if getattr(rag, "entity_merge", None) else []),
+                *(
+                    [rag.entity_merge.name_vdb]
+                    if getattr(rag, "entity_merge", None)
+                    else []
+                ),
                 rag.relationships_vdb,
                 rag.chunks_vdb,
                 rag.chunk_entity_relation_graph,

@@ -8,6 +8,7 @@ import { isAuthenticationRequiredError } from './errors'
 
 // Loaded BEFORE any mock.module call, because the real '@/lib/constants' pulls
 // '@/lib/utils' and the constants overlay below must spread the real exports.
+const originalFetch = globalThis.fetch
 const realConstants = await import('@/lib/constants')
 
 const storageData = new Map<string, string>()
@@ -38,8 +39,8 @@ Object.defineProperty(globalThis, 'sessionStorage', {
 //   don't navigate, while later files still see the real service.
 // The remaining mock.module targets are leaf-ish dependencies where an
 // overlay is sufficient: '@/lib/constants' (spread-real, pins the base URL)
-// and 'axios' (feeds the guest-token refresh; api/lightrag is imported
-// dynamically AFTER this mock so its axios instance is the mocked one).
+// Guest-token refresh uses the real axios instance's restorable adapter seam,
+// so later files retain its real interceptors and defaults.
 // An OVERLAY on the real module, not a replacement. `mock.module` is global for
 // the whole `bun test` run and is never undone, so a factory returning only the
 // three exports this file needs also deletes every OTHER export of that module
@@ -55,36 +56,6 @@ mock.module('@/lib/constants', () => ({
   popularLabelsDefaultLimit: 300,
   searchLabelsDefaultLimit: 50,
 }))
-
-// Mock axios — the module calls axios.create() at top level and
-// axios.get() in silentRefreshGuestToken
-mock.module('axios', () => {
-  const instance = {
-    get: () =>
-      Promise.resolve({
-        data: {
-          access_token: 'mock-guest-token',
-          auth_configured: false,
-          core_version: '1.0',
-          api_version: '1.0',
-        },
-        headers: {},
-      }),
-    post: () => Promise.resolve({ data: {}, headers: {} }),
-    interceptors: {
-      request: { use: () => {} },
-      response: { use: () => {} },
-    },
-  }
-  // The default export from axios is the main axios function, which also has
-  // .create, .get, .post, etc. as static methods.
-  const axiosFn: any = () => Promise.resolve({ data: {}, headers: {} })
-  axiosFn.create = () => instance
-  axiosFn.get = instance.get
-  axiosFn.post = instance.post
-  axiosFn.interceptors = instance.interceptors
-  return { default: axiosFn, __esModule: true }
-})
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -156,6 +127,10 @@ beforeAll(async () => {
   authStore = (await import('@/stores/state')).useAuthStore
   const { navigationService } = await import('@/services/navigation')
   apiModule = await import('./lightrag')
+  apiModule.__setAxiosAdapterForTests(async (config: any) => ({
+    data: { access_token: 'mock-guest-token', auth_configured: false, core_version: '1.0', api_version: '1.0' },
+    status: 200, statusText: 'OK', headers: {}, config
+  }))
 
   // Restorable, not module-level: the 401 paths under test call this; a
   // module mock would leak a no-op service into every later test file.
@@ -171,6 +146,9 @@ beforeAll(async () => {
 })
 
 afterAll(() => {
+  apiModule.__setAxiosAdapterForTests(undefined)
+  mock.module('@/lib/constants', () => realConstants)
+  globalThis.fetch = originalFetch
   restoreMocks?.()
 })
 

@@ -63,7 +63,7 @@ export default function RetrievalView() {
   // margin. The resulting 32px clearance also stays above StatusIndicator.
   return (
     <div className="flex size-full gap-2 overflow-hidden px-2 pb-8">
-      <div className="flex grow flex-col gap-4">
+      <div className="flex min-w-0 grow flex-col gap-4">
         <MessageList
           messages={session.messages}
           isLoading={session.isLoading}

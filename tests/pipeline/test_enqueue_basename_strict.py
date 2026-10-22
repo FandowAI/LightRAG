@@ -156,10 +156,11 @@ async def test_enqueue_marks_a_unique_existing_basename_as_duplicate(tmp_path):
         dup_rows = {k: v for k, v in rows.items() if k.startswith("dup-")}
         assert len(dup_rows) == 1
         (dup,) = dup_rows.values()
-        assert dup["status"] == DocStatus.FAILED
+        assert dup["status"] == DocStatus.SKIPPED
         assert dup["metadata"]["duplicate_kind"] == "filename"
         assert dup["metadata"]["original_doc_id"] == original_id
-        assert "File name already exists" in dup["error_msg"]
+        assert dup["error_msg"] is None
+        assert "File name already exists" in dup["metadata"]["skip_reason"]
     finally:
         await rag.finalize_storages()
 

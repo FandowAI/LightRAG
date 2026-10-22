@@ -24,6 +24,10 @@ describe('documentStatusFilters', () => {
       status_filter: 'failed',
       status_filters: null
     })
+    expect(getStatusRequestFilters('skipped')).toEqual({
+      status_filter: 'skipped',
+      status_filters: null
+    })
   })
 
   test('builds empty request filters for the all tab', () => {

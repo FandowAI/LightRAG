@@ -15,6 +15,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/com
 import EmptyCard from '@/components/ui/EmptyCard'
 import Checkbox from '@/components/ui/Checkbox'
 import UploadDocumentsDialog from '@/components/documents/UploadDocumentsDialog'
+import DuplicateSkippedLabel from '@/components/documents/DuplicateSkippedLabel'
 import ClearDocumentsDialog from '@/components/documents/ClearDocumentsDialog'
 import EntityMergeSettingsDialog from '@/components/documents/EntityMergeSettingsDialog'
 import DeleteDocumentsDialog from '@/components/documents/DeleteDocumentsDialog'
@@ -449,6 +450,7 @@ export default function DocumentManager() {
     parse: 1,
     analyze: 1,
     process: 1,
+    skipped: 1,
     failed: 1,
   });
 
@@ -523,6 +525,7 @@ export default function DocumentManager() {
       parse: 1,
       analyze: 1,
       process: 1,
+      skipped: 1,
       failed: 1,
     });
   };
@@ -532,6 +535,11 @@ export default function DocumentManager() {
 
   const getStatusDisplay = useCallback((status: DocStatus): StatusDisplayConfig => {
     switch (status) {
+      case 'skipped':
+        return {
+          labelKey: 'documentPanel.documentManager.status.skipped',
+          className: 'text-slate-500'
+        }
       case 'processed':
         return {
           labelKey: 'documentPanel.documentManager.status.completed',
@@ -639,6 +647,7 @@ export default function DocumentManager() {
   const analyzeCount = getCountValue(statusCounts, 'ANALYZING', 'analyzing');
   const processCount = getCountValue(statusCounts, 'PROCESSING', 'processing');
   const failedCount = getCountValue(statusCounts, 'FAILED', 'failed');
+  const skippedCount = getCountValue(statusCounts, 'SKIPPED', 'skipped');
 
   // Previous status-count digest. `null` means "no snapshot observed yet",
   // which is distinct from a digest that happens to be empty — see the effect
@@ -763,6 +772,7 @@ export default function DocumentManager() {
       parse: 1,
       analyze: 1,
       process: 1,
+      skipped: 1,
       failed: 1,
     });
 
@@ -1327,7 +1337,7 @@ export default function DocumentManager() {
   // Trigger a health check when the corpus-wide status counts change.
   //
   // Driven by `statusCounts` rather than the page's own documents: it is the
-  // backend's tally over all seven statuses, so it also sees `pending` and
+  // backend's tally over every status, so it also sees `pending` and
   // `preprocessed` moving — the two statuses that have no filter bucket and
   // were therefore invisible to the per-page structure this replaced.
   useEffect(() => {
@@ -1629,6 +1639,15 @@ export default function DocumentManager() {
                   </Button>
                   <Button
                     size="sm"
+                    variant={statusFilter === 'skipped' ? 'secondary' : 'outline'}
+                    onClick={() => handleStatusFilterChange('skipped')}
+                    disabled={isRefreshing}
+                    className="text-slate-500"
+                  >
+                    {t('documentPanel.documentManager.filters.skipped')} ({skippedCount})
+                  </Button>
+                  <Button
+                    size="sm"
                     variant={statusFilter === 'failed' ? 'secondary' : 'outline'}
                     onClick={() => handleStatusFilterChange('failed')}
                     disabled={isRefreshing}
@@ -1811,7 +1830,7 @@ export default function DocumentManager() {
                             </TableCell>
                             <TableCell>
                               <div className="flex items-center">
-                                {(() => {
+                                {doc.status === 'skipped' ? <DuplicateSkippedLabel /> : (() => {
                                   const statusDisplay = getStatusDisplay(doc.status)
                                   return (
                                     <span className={statusDisplay.className}>

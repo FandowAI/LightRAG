@@ -1832,10 +1832,10 @@ def test_concurrent_enqueue_dedupes_same_content_different_filenames(tmp_path):
                 f"got {len(pending_docs)}: {list(pending_docs.keys())}"
             )
 
-            # The duplicate record (FAILED + duplicate_kind=content_hash)
+            # The duplicate record (SKIPPED + duplicate_kind=content_hash)
             # carries the second filename and the metadata pointer back
             # to the original.
-            failed_docs = await rag.doc_status.get_docs_by_statuses([DocStatus.FAILED])
+            failed_docs = await rag.doc_status.get_docs_by_statuses([DocStatus.SKIPPED])
             duplicate_records = [
                 d
                 for d in failed_docs.values()
@@ -1845,7 +1845,7 @@ def test_concurrent_enqueue_dedupes_same_content_different_filenames(tmp_path):
                 )
             ]
             assert len(duplicate_records) == 1, (
-                f"Expected exactly 1 content_hash-duplicate FAILED row, "
+                f"Expected exactly 1 content_hash-duplicate SKIPPED row, "
                 f"got {len(duplicate_records)}"
             )
             dup = duplicate_records[0]
@@ -2099,7 +2099,7 @@ def test_enqueue_dedupes_by_filename_and_content_hash(tmp_path):
             third_id = compute_mdhash_id("third.txt", prefix="doc-")
             assert await rag.full_docs.get_by_id(third_id) is None
 
-            failed_docs = await rag.doc_status.get_docs_by_statuses([DocStatus.FAILED])
+            failed_docs = await rag.doc_status.get_docs_by_statuses([DocStatus.SKIPPED])
             kinds = {
                 getattr(doc, "metadata", {}).get("duplicate_kind")
                 for doc in failed_docs.values()
@@ -2139,7 +2139,7 @@ def test_enqueue_dedupes_parser_hinted_filename_variants(tmp_path):
             )
             assert (await rag.full_docs.get_by_id(first_id))["content"] == "alpha body"
 
-            failed_docs = await rag.doc_status.get_docs_by_statuses([DocStatus.FAILED])
+            failed_docs = await rag.doc_status.get_docs_by_statuses([DocStatus.SKIPPED])
             # The duplicate record stores the canonical basename — hint is
             # not preserved anywhere in the new schema.
             assert any(
@@ -2620,7 +2620,7 @@ def test_pending_parse_duplicate_hash_fails_and_archives_source(tmp_path, monkey
 
             duplicate_id = compute_mdhash_id("duplicate.docx", prefix="doc-")
             duplicate_status = await rag.doc_status.get_by_id(duplicate_id)
-            assert duplicate_status["status"] == DocStatus.FAILED
+            assert duplicate_status["status"] == DocStatus.SKIPPED
             assert duplicate_status["metadata"]["is_duplicate"] is True
             assert duplicate_status["metadata"]["duplicate_kind"] == "content_hash"
             assert duplicate_status["metadata"]["original_doc_id"] == original_id

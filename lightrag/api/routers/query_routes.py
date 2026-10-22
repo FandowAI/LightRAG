@@ -6,7 +6,7 @@ import asyncio
 import json
 import time
 from typing import Any, Dict, List, Literal, Optional
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from lightrag.base import QueryParam
 from lightrag.api.input_limits import count_conversation_input_chars
 from lightrag.api.utils_api import get_combined_auth_dependency, internal_server_error
@@ -37,11 +37,11 @@ class QueryRequest(BaseModel):
         ),
     )
 
-    mode: Literal[
-        "local", "global", "hybrid", "naive", "mix", "graph", "bypass"
-    ] = Field(
-        default="mix",
-        description="Query mode",
+    mode: Literal["local", "global", "hybrid", "naive", "mix", "graph", "bypass"] = (
+        Field(
+            default="mix",
+            description="Query mode",
+        )
     )
 
     graph_depth: int = Field(
@@ -393,6 +393,28 @@ class GraphQueryBatchResponse(BaseModel):
     status: Literal["success", "partial_success", "failure"]
     results: List[Dict[str, Any]]
     metadata: Dict[str, Any]
+
+
+class EntityCenterRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    min_neighbors: int = Field(default=3, ge=1, le=1000)
+    min_documents: int = Field(default=2, ge=1, le=100)
+
+
+class EntityPackageRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    entity_name: str = Field(min_length=1, max_length=512)
+    graph_depth: int = Field(default=2, ge=0, le=5)
+    rag_top_k: int = Field(default=30, ge=1, le=100)
+    near_dedup: bool = True
+    near_threshold: float = Field(default=0.92, ge=0.8, le=1)
+
+    @model_validator(mode="after")
+    def require_entity_name(self):
+        if not self.entity_name.strip():
+            raise ValueError("Enter the exact graph entity name")
+        return self
 
 
 class StreamChunkResponse(BaseModel):
@@ -1636,9 +1658,47 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                 deduplicate_chunks_in_batch=request.deduplicate_chunks_in_batch,
             )
         except Exception as e:
-            logger.error(
-                f"Error processing batch graph query: {str(e)}", exc_info=True
-            )
+            logger.error(f"Error processing batch graph query: {str(e)}", exc_info=True)
             raise internal_server_error(e)
 
+    @router.post(
+        "/query/entity-centers",
+        dependencies=[Depends(get_combined_auth_dependency(api_key))],
+    )
+    async def entity_centers(request: EntityCenterRequest):
+        """Recommend reviewable centers using completed evidence, without writes."""
+        from lightrag.entity_centers import CenterSettings, from_rag
+
+        try:
+            return await from_rag(rag, CenterSettings(**request.model_dump()))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Center candidate selection failed")
+            raise internal_server_error(exc) from exc
+
+    @router.post(
+        "/query/entity-packages",
+        dependencies=[Depends(get_combined_auth_dependency(api_key))],
+    )
+    async def entity_packages(request: EntityPackageRequest):
+        """Collect completed source evidence around an exact graph entity.
+
+        Returns distillation inputs and a dedup audit; does not generate QAs or
+        delete sources, and does not change ordinary query/mix behavior.
+        """
+        from lightrag.entity_packages import PackageSettings, from_rag
+
+        try:
+            settings = PackageSettings(**request.model_dump(exclude={"entity_name"}))
+            return await from_rag(rag, request.entity_name.strip(), settings)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Entity evidence packaging failed")
+            raise internal_server_error(exc) from exc
+
+    from lightrag.api.routers.batch_routes import create_batch_routes
+
+    router.include_router(create_batch_routes(rag, api_key))
     return router
