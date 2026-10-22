@@ -1,0 +1,85 @@
+# Source-to-QA classification, expert review and at most one revision by default.
+# Replace endpoint/model names before real calls. All paths are YAML-relative.
+# This is the bridge-owned copy of review_classifition.yaml.
+# Configure source locations in data_workflow.yaml; input/output below are
+# replaced in each job snapshot. Relative prompt_file paths use this directory.
+schema_version: 3
+input:
+  paths: [../data/review_classifition.jsonl]
+output:
+  directory: ../../runs/review-classifition
+runtime:
+  batch_size: 1
+  max_inflight_requests: 2
+models:
+  generation:
+    api_url: https://api.example.com/v1/chat/completions
+    model_name: replace-with-generation-model
+    key_name_of_api_key: QA_API_KEY
+    max_workers: 1
+  classifier:
+    api_url: https://api.example.com/v1/chat/completions
+    model_name: replace-with-classification-model
+    key_name_of_api_key: CLASSIFIER_API_KEY
+    max_workers: 1
+  judge:
+    api_url: https://api.example.com/v1/chat/completions
+    model_name: replace-with-judge-model
+    key_name_of_api_key: JUDGE_API_KEY
+    max_workers: 1
+workflow:
+  name: review_classifition
+  parameters:
+    questions_per_source: 1
+    scenario_instructions: 依据原文生成一个采购审批条件缺失的工作情境题，不预设处理后果。
+    # max_revision_attempts defaults to 1 only in this workflow; 0 disables revision.
+    revision_filter: {}
+    # To revise only low-difficulty below-threshold QA, replace {} with:
+    #   difficulty: [low]
+    # Optional AND conditions: importance: [high], failed_dimensions_any: [grounding]
+    scenario:
+      model: generation
+      prompt: ScenarioPrompt
+      parser: scenarios_json.v1
+    qa:
+      model: generation
+      prompt: GeneratePrompt
+      parser: qa_json.v1
+    classification:
+      model: classifier
+      prompt: QAClassificationPrompt
+      parser: classification_json.v1
+      # prompt_file: ../prompts/classify.md
+    classification_instructions: 分别判断错误使用的业务影响及基于当前正文核实答案的难度，给出具体理由。
+    experts:
+      - id: primary
+        model: judge
+        prompt: JudgePrompt
+        parser: evaluation_json.v1
+        weight: 1.0
+      - id: secondary
+        model: judge
+        prompt: JudgePrompt
+        parser: evaluation_json.v1
+        weight: 1.0
+    revision:
+      model: generation
+      prompt: ReviewClassifitionRevisePrompt
+      parser: qa_json.v1
+    quality:
+      score_min: 1.0
+      score_max: 5.0
+      rubric: 1=严重缺陷；2=明显缺陷；3=基本可用；4=准确清晰且符合要求；5=完整精确且有训练价值。
+      dimensions:
+        grounding:
+          description: 事实、条件及结论均有原文依据，不虚构处理后果。
+          min_score: 4.0
+        alignment:
+          description: 直接回答当前情境问题，无关键遗漏。
+          min_score: 4.0
+        question_quality:
+          description: 有主体、事项、当前条件与待处理问题，聚焦一个规则且可独立理解。
+          min_score: 4.0
+        training_value:
+          description: 情境有实际用途，答案简洁充分，不堆叠无关内容。
+          min_score: 4.0

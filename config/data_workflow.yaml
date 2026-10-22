@@ -1,0 +1,22 @@
+# Backend-only integration. Paths are relative to this file unless absolute.
+# Override this file location with LIGHTRAG_DATA_WORKFLOW_CONFIG.
+version: 1
+project_directory: /root/data-work-flow
+# Keep the venv interpreter path; do not substitute its resolved symlink target.
+python: /root/data-work-flow/.venv-api/bin/python
+workflow_config: data_workflow_job.yaml
+# Set to a credentials-only .env file, or leave null to use process credentials.
+credentials_file: null
+jobs_directory: ../runs/data-workflow
+input:
+  # JSON file, JSON array, JSONL, directory, or glob. Finish writing before submit.
+  # Example: [../incoming/query-results]
+  paths: []
+  # Optional wrapper path, e.g. [payload, results]. Standard /query/data uses [].
+  records_path: []
+limits:
+  max_input_bytes: 67108864
+  max_records: 10000
+  max_active_jobs: 1
+  # null means no execution timeout, in seconds.
+  timeout_seconds: null

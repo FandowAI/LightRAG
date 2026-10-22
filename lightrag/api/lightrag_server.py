@@ -71,6 +71,8 @@ from lightrag.parser.routing import (
 )
 from lightrag.parser.external.mineru.cache import MinerUParserOptions
 from lightrag.api.routers.query_routes import create_query_routes
+from lightrag.api.routers.data_workflow_routes import create_data_workflow_routes
+from lightrag.integrations.data_workflow.service import DataWorkflowService
 from lightrag.api.routers.prompt_admin_routes import create_prompt_admin_routes
 from lightrag.api.routers.entity_merge_routes import create_entity_merge_routes
 from lightrag.entity_merge import EntityMergeManager
@@ -2607,6 +2609,9 @@ def create_app(args):
     # routes stay at their natural paths and are prefixed by the proxy or uvicorn --root-path
     app.include_router(create_document_routes(rag, doc_manager, api_key))
     app.include_router(create_query_routes(rag, api_key, args.top_k))
+    app.include_router(
+        create_data_workflow_routes(DataWorkflowService(args.workspace), api_key)
+    )
     app.include_router(create_graph_routes(rag, api_key))
     if entity_merge is not None:
         app.include_router(create_entity_merge_routes(entity_merge, api_key, args.workers))

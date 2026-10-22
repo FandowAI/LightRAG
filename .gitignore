@@ -28,6 +28,10 @@ build/
 site/
 
 # Logs / Reports
+# Local analysis artifacts
+/analysis/
+# Local delivery jobs, retrieved evidence, generated QA and job snapshots
+/runs/data-workflow/
 *.log
 *.log.*
 *.logfire
