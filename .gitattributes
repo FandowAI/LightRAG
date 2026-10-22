@@ -1,2 +1,5 @@
 lightrag/api/webui/** binary
 lightrag/api/webui/** linguist-generated
+
+# Prompt frames deliberately end with blank lines matching their format contract.
+lightrag/prompt_templates/zh/*.txt whitespace=-blank-at-eof

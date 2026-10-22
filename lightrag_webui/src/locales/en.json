@@ -622,6 +622,11 @@
     "quotaDropped": "Browser storage is full: the chat history is no longer being saved. The current conversation stays visible until you leave the page."
   },
   "entityMerge": {
+    "identityDescription": "Check the verified glossary, then verify identity and original evidence with the model. Keep uncertain objects separate.",
+    "identityRules": "Similarity proposes candidates only; conflicting scopes cannot merge; identity requires a verified alias or original evidence.",
+    "identityEnabled": "Enable model identity checks (verified glossary remains active)",
+    "identityHint": "A candidate score does not confirm identity. Settings apply to future writes and do not rewrite the existing graph.",
+    "identityPreview": "Name candidates only; identity and original evidence are checked automatically during ingestion.",
     "button": "Graph ingestion settings",
     "title": "Semantic entity merging",
     "description": "Compares entity name embeddings during graph ingestion. Saved settings apply to future documents.",

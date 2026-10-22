@@ -78,6 +78,9 @@ from lightrag.chunk_schema import (
 )
 from lightrag.prompt import PROMPTS, resolve_entity_extraction_prompt_profile
 from lightrag.prompt_admin_cache import prompt_admin_cache_digest
+from lightrag.enterprise_knowledge import (
+    parsed_metadata, metadata_for_graph, surviving_metadata, remap_cached_fragments, knowledge_context,
+)
 from lightrag.constants import (
     GRAPH_FIELD_SEP,
     DEFAULT_MAX_ENTITY_TOKENS,
@@ -1013,6 +1016,7 @@ async def _process_json_extraction_result(
                 file_path=file_path,
                 timestamp=timestamp,
             )
+            node_data.update(parsed_metadata(entity_data))
             maybe_nodes[truncated_name].append(node_data)
 
         except Exception as e:
@@ -1276,6 +1280,14 @@ async def rebuild_knowledge_from_chunks(
             status_logger.log(status_message)
             continue
 
+    canonical_names = set(entities_to_rebuild)
+    for pair in relationships_to_rebuild:
+        canonical_names.update(pair)
+    identity_errors = await remap_cached_fragments(
+        chunk_entities, chunk_relationships, canonical_names, knowledge_graph_inst,
+        strict=rebuild_policy == "rollback",
+    )
+
     # Get max async tasks limit from global_config for semaphore control
     graph_max_async = global_config.get("llm_model_max_async", 4) * 2
     semaphore = asyncio.Semaphore(graph_max_async)
@@ -1296,6 +1308,8 @@ async def rebuild_knowledge_from_chunks(
                 [entity_name], namespace=namespace, enable_logging=False
             ):
                 try:
+                    if entity_name in identity_errors:
+                        raise identity_errors[entity_name]
                     degraded = await _rebuild_single_entity(
                         knowledge_graph_inst=knowledge_graph_inst,
                         entities_vdb=entities_vdb,
@@ -1334,6 +1348,9 @@ async def rebuild_knowledge_from_chunks(
                 enable_logging=False,
             ):
                 try:
+                    for endpoint in (src, tgt):
+                        if endpoint in identity_errors:
+                            raise identity_errors[endpoint]
                     degraded = await _rebuild_single_relationship(
                         knowledge_graph_inst=knowledge_graph_inst,
                         relationships_vdb=relationships_vdb,
@@ -1792,6 +1809,8 @@ async def _rebuild_single_entity(
                 "created_at": int(time.time()),
                 "truncate": truncation_info,
             }
+
+            updated_entity_data.update(surviving_metadata(current_entity, chunk_ids))
 
             # Construct and verify the VDB payload BEFORE the first graph
             # mutation: if truncation fails (a deterministic, non-retryable
@@ -2448,6 +2467,7 @@ async def _merge_nodes_then_upsert(
         # throwaway logger reproduces the one-shot helper's behavior.
         status_logger = PipelineStatusLogger(pipeline_status)
     timing_start = time.perf_counter()
+    all_fact_rows = list(nodes_data)
     try:
         already_entity_types = []
         already_source_ids = []
@@ -2562,6 +2582,10 @@ async def _merge_nodes_then_upsert(
                     f"{len(existing_full_source_ids)}/{len(full_source_ids)} (limit {max_source_limit})"
                 )
                 existing_node_data = dict(already_node)
+                facts = metadata_for_graph(all_fact_rows, already_node, full_source_ids)
+                if any(existing_node_data.get(key) != value for key, value in facts.items()):
+                    existing_node_data.update(facts)
+                    await knowledge_graph_inst.upsert_node(entity_name, existing_node_data)
                 return existing_node_data
             else:
                 logger.error(
@@ -2735,6 +2759,8 @@ async def _merge_nodes_then_upsert(
             created_at=int(time.time()),
             truncate=truncation_info,
         )
+
+        node_data.update(metadata_for_graph(all_fact_rows, already_node, full_source_ids))
 
         # Construct and verify the VDB payload BEFORE the first graph
         # mutation: if truncation fails (a deterministic, non-retryable
@@ -5576,6 +5602,7 @@ async def _apply_token_truncation(
         entities_context.append(
             {
                 "entity": entity_name,
+                **knowledge_context(entity),
                 "type": entity.get("entity_type", "UNKNOWN"),
                 "description": entity.get("description", "UNKNOWN"),
                 "created_at": created_at,

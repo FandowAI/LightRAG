@@ -6115,6 +6115,11 @@ def create_document_routes(
                     )
                     storage_success_count += 1
 
+            merge_manager = getattr(rag, "entity_merge", None)
+            enterprise = getattr(merge_manager, "enterprise", None)
+            if storage_error_count == 0 and enterprise is not None:
+                await asyncio.to_thread(enterprise.clear_aliases)
+
             # Log storage drop results
             if storage_error_count > 0:
                 append_pipeline_history(

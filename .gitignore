@@ -99,3 +99,9 @@ memory-bank
 
 # native_parser/docx CLI output (audit JSONL + image dir)
 /parse_output/
+
+# Versioned enterprise policy; keep all other user prompts and private rosters local.
+!prompts/entity_type/
+prompts/entity_type/*
+!prompts/entity_type/fando_enterprise.yml
+/config/*.private.json
