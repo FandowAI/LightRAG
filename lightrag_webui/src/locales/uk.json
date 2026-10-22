@@ -464,8 +464,12 @@
         "global": "Global",
         "hybrid": "Hybrid",
         "mix": "Mix",
+        "graph": "Graph",
         "bypass": "Bypass"
       },
+      "graphDepth": "Глибина графа",
+      "graphDepthTooltip": "Максимальна кількість переходів від точно знайденої кореневої сутності (0-5).",
+      "graphDepthPlaceholder": "Введіть глибину графа",
       "responseFormat": "Формат відповіді",
       "responseFormatTooltip": "Визначає формат відповіді. Приклади:\n• Кілька абзаців\n• Один абзац\n• Маркований список",
       "responseFormatOptions": {

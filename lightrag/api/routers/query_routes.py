@@ -31,15 +31,24 @@ class QueryRequest(BaseModel):
     query: str = Field(
         max_length=MAX_QUERY_CHARS,
         description=(
-            "The query text. Must not be empty. RAG modes additionally require "
-            "an English-equivalent length of at least 3; each Chinese, "
-            "Japanese or Korean character counts as 2."
+            "The query text. Must not be empty. Retrieval modes other than "
+            "graph additionally require an English-equivalent length of at "
+            "least 3; each Chinese, Japanese or Korean character counts as 2."
         ),
     )
 
-    mode: Literal["local", "global", "hybrid", "naive", "mix", "bypass"] = Field(
+    mode: Literal[
+        "local", "global", "hybrid", "naive", "mix", "graph", "bypass"
+    ] = Field(
         default="mix",
         description="Query mode",
+    )
+
+    graph_depth: int = Field(
+        default=1,
+        ge=0,
+        le=5,
+        description="Maximum hop depth for exact-root graph traversal mode.",
     )
 
     only_need_context: Optional[bool] = Field(
@@ -223,11 +232,11 @@ class QueryRequest(BaseModel):
     def enforce_rag_query_minimum(self) -> "QueryRequest":
         """Hold RAG queries to a length that can actually retrieve something.
 
-        `bypass` goes straight to the LLM without touching the index, so the
-        retrieval-shaped minimum does not apply to it; the non-empty check on
-        the field does.
+        `bypass` goes straight to the LLM and `graph` accepts exact one-character
+        entity identifiers, so the retrieval-shaped minimum does not apply to
+        them; the non-empty check on the field does.
         """
-        if self.mode != "bypass":
+        if self.mode not in ("bypass", "graph"):
             validate_rag_query(self.query)
         return self
 
@@ -269,6 +278,69 @@ class QueryRequest(BaseModel):
         param = QueryParam(**request_data)
         param.stream = is_stream
         return param
+
+
+class GraphQueryBatchRequest(BaseModel):
+    """Ordered, request-scoped batch of exact-root graph traversals."""
+
+    entities: List[str] = Field(
+        min_length=1,
+        max_length=100,
+        description="Entity names to traverse in input order.",
+    )
+    mode: Literal["graph"] = Field(
+        default="graph",
+        description="Batch data retrieval is available only for graph mode.",
+    )
+    graph_depth: int = Field(
+        default=1,
+        ge=0,
+        le=5,
+        description="Maximum hop depth for each exact-root graph traversal.",
+    )
+    deduplicate_relations: bool = Field(
+        default=True,
+        description=(
+            "Prune traversal branches that enter entity roots processed earlier "
+            "in this request. Other branches remain available even when their "
+            "relationships appeared in an earlier result."
+        ),
+    )
+    deduplicate_chunks_in_batch: bool = Field(
+        default=False,
+        description="Remove chunks already returned earlier in this request.",
+    )
+
+    @field_validator("entities", mode="after")
+    @classmethod
+    def validate_entities(cls, entities: List[str]) -> List[str]:
+        normalized_entities: List[str] = []
+        total_chars = 0
+        for entity in entities:
+            if not isinstance(entity, str):
+                raise ValueError("each entity must be a string")
+            normalized_entity = validate_query_not_empty(entity)
+            if len(normalized_entity) > MAX_QUERY_CHARS:
+                raise ValueError(
+                    f"each entity must be at most {MAX_QUERY_CHARS} characters"
+                )
+            total_chars += len(normalized_entity)
+            normalized_entities.append(normalized_entity)
+
+        if total_chars > MAX_REQUEST_TEXT_CHARS:
+            raise ValueError(
+                f"total entity text is {total_chars} characters, over the "
+                f"{MAX_REQUEST_TEXT_CHARS} character limit"
+            )
+        return normalized_entities
+
+    def to_query_params(self) -> QueryParam:
+        return QueryParam(
+            mode="graph",
+            graph_depth=self.graph_depth,
+            only_need_context=True,
+            enable_rerank=False,
+        )
 
 
 class ReferenceItem(BaseModel):
@@ -315,6 +387,12 @@ class QueryDataResponse(BaseModel):
     metadata: Dict[str, Any] = Field(
         description="Query metadata including mode, keywords, and processing information"
     )
+
+
+class GraphQueryBatchResponse(BaseModel):
+    status: Literal["success", "partial_success", "failure"]
+    results: List[Dict[str, Any]]
+    metadata: Dict[str, Any]
 
 
 class StreamChunkResponse(BaseModel):
@@ -1443,6 +1521,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
         - **hybrid**: Combines local and global retrieval strategies
         - **naive**: Returns only vector-retrieved text chunks (no knowledge graph)
         - **mix**: Integrates knowledge graph data with vector-retrieved chunks
+        - **graph**: Traverses from an exact entity root using deterministic DFS
         - **bypass**: Returns empty data arrays (used for direct LLM queries)
 
         **Data Structure:**
@@ -1540,6 +1619,26 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                 )
         except Exception as e:
             logger.error(f"Error processing data query: {str(e)}", exc_info=True)
+            raise internal_server_error(e)
+
+    @router.post(
+        "/query/data/batch",
+        response_model=GraphQueryBatchResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def query_data_batch(request: GraphQueryBatchRequest):
+        """Run ordered graph traversals with request-local evidence deduplication."""
+        try:
+            return await rag.aquery_data_batch(
+                request.entities,
+                param=request.to_query_params(),
+                deduplicate_relations=request.deduplicate_relations,
+                deduplicate_chunks_in_batch=request.deduplicate_chunks_in_batch,
+            )
+        except Exception as e:
+            logger.error(
+                f"Error processing batch graph query: {str(e)}", exc_info=True
+            )
             raise internal_server_error(e)
 
     return router

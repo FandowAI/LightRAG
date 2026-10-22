@@ -175,9 +175,10 @@ export type LightragStatus = {
  * - "global": Utilizes global knowledge.
  * - "hybrid": Combines local and global retrieval methods.
  * - "mix": Integrates knowledge graph and vector retrieval.
+ * - "graph": Traverses the knowledge graph from an exact entity root.
  * - "bypass": Bypasses knowledge retrieval and directly uses the LLM.
  */
-export type QueryMode = 'naive' | 'local' | 'global' | 'hybrid' | 'mix' | 'bypass'
+export type QueryMode = 'naive' | 'local' | 'global' | 'hybrid' | 'mix' | 'graph' | 'bypass'
 
 export type Message = {
   role: 'user' | 'assistant' | 'system'
@@ -203,6 +204,8 @@ export type QueryRequest = {
   stream?: boolean
   /** Number of top items to retrieve. Represents entities in 'local' mode and relationships in 'global' mode. */
   top_k?: number
+  /** Maximum hop depth for exact-root graph traversal mode. */
+  graph_depth?: number
   /** Maximum number of text chunks to retrieve and keep after reranking. */
   chunk_top_k?: number
   /** Maximum number of tokens allocated for entity context in unified token control system. */

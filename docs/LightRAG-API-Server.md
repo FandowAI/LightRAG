@@ -516,7 +516,7 @@ server {
      Setting `MAX_REQUEST_BODY_BYTES` to any positive value makes it govern every non-upload route, ingestion included — including when that value happens to equal the 1 MiB default, which is the behaviour this knob had before the tiers existed. Setting it to `0` turns off every ceiling, including the derived upload one, and the server warns at startup.
    - **Input field ceilings** apply to the model-facing fields of `/query*`, `/api/chat` and `/api/generate`: 64 KiB per query or prompt, 32 KiB per message, 128 KiB of model-facing text per request, 128 messages, and upper bounds on `top_k` / `chunk_top_k` (1000) and the `max_*_tokens` budgets (1,000,000). These are fixed rather than configurable — a limit that keeps an unauthenticated caller from choosing how much CPU the server spends is worth nothing if it can be misconfigured away. `/query*` answers **422** for an over-limit field (FastAPI's own validation response); `/api/*` answers **413**.
    - **Non-empty query**: every path refuses a query that is empty or only whitespace after trimming — `bypass`, Open WebUI metadata tasks and `/api/generate` included. Exemption from the RAG minimum below is not exemption from having to carry a prompt.
-   - **RAG query minimum**: retrieval modes require an English-equivalent query length of at least 3 after trimming outer whitespace. Each Chinese, Japanese or Korean character counts as 2 and every other Unicode character counts as 1. This applies to the core query APIs, `/query*`, and the RAG branches of `/api/chat`; `bypass`, Open WebUI metadata tasks forwarded directly to the LLM, and `/api/generate` are exempt from the minimum only. `/query` and `/query/stream` answer **422**, `/query/data` **400**, and `/api/*` **400**.
+   - **RAG query minimum**: retrieval modes require an English-equivalent query length of at least 3 after trimming outer whitespace. Each Chinese, Japanese or Korean character counts as 2 and every other Unicode character counts as 1. This applies to the core query APIs, `/query*`, and the RAG branches of `/api/chat`; exact-entity `graph`, `bypass`, Open WebUI metadata tasks forwarded directly to the LLM, and `/api/generate` are exempt from the minimum only. `/query` and `/query/stream` answer **422**, `/query/data` **400**, and `/api/*` **400**.
    - `MAX_TEXTS_PER_REQUEST` bounds how many texts one `/documents/texts` request may carry, answering **413** before any per-text storage lookup. It bounds the fan-out of a single request, so — unlike the capacity limit below — it is not a "retry later" condition: an oversized batch never fits and must be split.
    - `MAX_PENDING_DOCUMENTS` bounds how many documents may be active (`PENDING`/`PARSING`/`ANALYZING`/`PROCESSING`) or reserved by an in-flight request. Over capacity the server answers **429** with a `Retry-After` header and a detail naming the current count, the requested count and the capacity — refused *before* the body is transferred. `/documents/scan` and manual retries exceed the cap on purpose; the documents they create make ordinary uploads wait.
 
@@ -604,6 +604,20 @@ sudo systemctl status lightrag.service
 sudo systemctl enable lightrag.service
 ```
 
+## Exact-Entity Graph Queries
+
+Use `mode: "graph"` with `/query`, `/query/stream`, or `/query/data` to start from an exact normalized entity identifier and traverse its neighborhood without keyword extraction, vector retrieval, or reranking. `graph_depth` accepts `0` through `5`; `0` returns only the root entity and the default is `1`.
+
+```json
+{
+  "query": "A",
+  "mode": "graph",
+  "graph_depth": 2
+}
+```
+
+For ordered dataset generation, `/query/data/batch` accepts `entities`, `graph_depth`, `deduplicate_relations`, and `deduplicate_chunks_in_batch`. With relationship deduplication enabled, each earlier entity root becomes a traversal boundary for later roots. A later result omits only branches that enter an earlier root, while retaining its other branches even if some relationships were already included in an earlier result. This state is scoped to one request and follows input order; no state is shared between requests.
+
 ## Ollama Emulation
 
 We provide Ollama-compatible interfaces for LightRAG, aiming to emulate LightRAG as an Ollama chat model. This allows AI chat frontends supporting Ollama, such as Open WebUI, to access LightRAG easily.
@@ -622,7 +636,7 @@ The default query mode is `mix` if you send a message (query) from the Ollama in
 
 A query prefix in the query string can determine which LightRAG query mode is used to generate the response for the query. The supported prefixes include:
 
-RAG queries must have an English-equivalent length of at least 3 after the prefix is removed; each Chinese, Japanese or Korean character counts as 2. Direct-LLM `/bypass` requests do not use this minimum, but no request may carry an empty query — a prefix that consumes the whole message (`/local[hint]`) is refused with **400**.
+RAG queries must have an English-equivalent length of at least 3 after the prefix is removed; each Chinese, Japanese or Korean character counts as 2. Exact-entity `/graph` and direct-LLM `/bypass` requests do not use this minimum, but no request may carry an empty query — a prefix that consumes the whole message (`/local[hint]`) is refused with **400**.
 
 ```
 /local
@@ -630,6 +644,7 @@ RAG queries must have an English-equivalent length of at least 3 after the prefi
 /hybrid
 /naive
 /mix
+/graph
 
 /bypass
 /context
@@ -638,9 +653,12 @@ RAG queries must have an English-equivalent length of at least 3 after the prefi
 /hybridcontext
 /naivecontext
 /mixcontext
+/graphcontext
 ```
 
 For example, the chat message `/hybrid What's LightRAG?` will trigger a hybrid mode query for LightRAG. A chat message without a query prefix will trigger a mix mode query by default.
+
+For `/graph`, the traversal depth defaults to `1`. Ollama clients can override it with `options.graph_depth` (`0` through `5`).
 
 `/bypass` is not a LightRAG query mode; it will tell the API Server to pass the query directly to the underlying LLM, including the chat history. So the user can use the LLM to answer questions based on the chat history. If you are using Open WebUI as a front end, you can just switch the model to a normal LLM instead of using the `/bypass` prefix.
 

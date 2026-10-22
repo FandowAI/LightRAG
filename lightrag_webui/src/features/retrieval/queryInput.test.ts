@@ -54,6 +54,14 @@ describe('prepareQueryInput', () => {
     })
   })
 
+  test('allows a single-character entity in graph mode', () => {
+    expect(prepareQueryInput('/graph A', 'mix')).toEqual({
+      ok: true,
+      query: 'A',
+      modeOverride: 'graph'
+    })
+  })
+
   test('accepts two-character Japanese and Korean queries', () => {
     // Weighing only Han as two rejected these while accepting '猫' and '今日'.
     for (const query of ['ねこ', '한글', '오늘']) {

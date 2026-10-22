@@ -464,8 +464,12 @@
         "global": "Global",
         "hybrid": "Hybrid",
         "mix": "Mix",
+        "graph": "Graph",
         "bypass": "Bypass"
       },
+      "graphDepth": "Глубина графа",
+      "graphDepthTooltip": "Максимальное число переходов от точно совпавшей корневой сущности (0-5).",
+      "graphDepthPlaceholder": "Введите глубину графа",
       "responseFormat": "Формат ответа",
       "responseFormatTooltip": "Определяет формат ответа. Примеры:\n• Несколько абзацев\n• Один абзац\n• Маркированный список",
       "responseFormatOptions": {

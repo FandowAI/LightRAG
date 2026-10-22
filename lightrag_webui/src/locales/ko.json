@@ -464,8 +464,12 @@
         "global": "Global",
         "hybrid": "Hybrid",
         "mix": "Mix",
+        "graph": "Graph",
         "bypass": "Bypass"
       },
+      "graphDepth": "그래프 깊이",
+      "graphDepthTooltip": "정확히 일치하는 루트 엔터티에서 탐색할 최대 관계 홉 수입니다(0-5).",
+      "graphDepthPlaceholder": "그래프 깊이 입력",
       "responseFormat": "응답 형식",
       "responseFormatTooltip": "응답 형식을 정의합니다. 예:\n• 여러 단락\n• 단일 단락\n• 글머리 기호",
       "responseFormatOptions": {

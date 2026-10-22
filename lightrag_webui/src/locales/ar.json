@@ -464,8 +464,12 @@
         "global": "عالمي",
         "hybrid": "مختلط",
         "mix": "مزيج",
+        "graph": "Graph",
         "bypass": "تجاوز"
       },
+      "graphDepth": "عمق الرسم البياني",
+      "graphDepthTooltip": "الحد الأقصى لعدد قفزات العلاقات من الكيان الجذر المطابق تمامًا (0-5).",
+      "graphDepthPlaceholder": "أدخل عمق الرسم البياني",
       "responseFormat": "تنسيق الرد",
       "responseFormatTooltip": "يحدد تنسيق الرد. أمثلة:\n• فقرات متعددة\n• فقرة واحدة\n• نقاط نقطية",
       "responseFormatOptions": {

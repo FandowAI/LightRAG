@@ -38,6 +38,7 @@ class SearchMode(str, Enum):
     global_ = "global"
     hybrid = "hybrid"
     mix = "mix"
+    graph = "graph"
     bypass = "bypass"
     context = "context"
 
@@ -349,6 +350,7 @@ def parse_query_mode(query: str) -> tuple[str, SearchMode, bool, Optional[str]]:
         "/naive ": (SearchMode.naive, False),
         "/hybrid ": (SearchMode.hybrid, False),
         "/mix ": (SearchMode.mix, False),
+        "/graph ": (SearchMode.graph, False),
         "/bypass ": (SearchMode.bypass, False),
         "/context": (
             SearchMode.mix,
@@ -359,6 +361,7 @@ def parse_query_mode(query: str) -> tuple[str, SearchMode, bool, Optional[str]]:
         "/hybridcontext": (SearchMode.hybrid, True),
         "/naivecontext": (SearchMode.naive, True),
         "/mixcontext": (SearchMode.mix, True),
+        "/graphcontext": (SearchMode.graph, True),
     }
 
     for prefix, (mode, only_need_context) in mode_map.items():
@@ -376,6 +379,24 @@ def parse_query_mode(query: str) -> tuple[str, SearchMode, bool, Optional[str]]:
             return cleaned_query, mode, only_need_context, user_prompt
 
     return query, SearchMode.mix, False, user_prompt
+
+
+def graph_depth_from_options(options: Optional[Dict[str, Any]]) -> int:
+    """Read LightRAG's graph depth extension from Ollama chat options."""
+
+    if not options or "graph_depth" not in options:
+        return 1
+    graph_depth = options["graph_depth"]
+    if (
+        isinstance(graph_depth, bool)
+        or not isinstance(graph_depth, int)
+        or not 0 <= graph_depth <= 5
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="options.graph_depth must be an integer between 0 and 5",
+        )
+    return graph_depth
 
 
 class OllamaAPI:
@@ -689,6 +710,10 @@ class OllamaAPI:
                     "conversation_history": conversation_history,
                     "top_k": self.top_k,
                 }
+                if mode == SearchMode.graph:
+                    param_dict["graph_depth"] = graph_depth_from_options(
+                        request.options
+                    )
 
                 # Add user_prompt to param_dict
                 if user_prompt is not None:
@@ -714,7 +739,8 @@ class OllamaAPI:
                             **role_kwargs,
                         )
                     else:
-                        cleaned_query = _validate_ollama_rag_query(cleaned_query)
+                        if mode != SearchMode.graph:
+                            cleaned_query = _validate_ollama_rag_query(cleaned_query)
                         response = await self.rag.aquery(
                             cleaned_query, param=query_param
                         )
@@ -884,7 +910,8 @@ class OllamaAPI:
                             **role_kwargs,
                         )
                     else:
-                        cleaned_query = _validate_ollama_rag_query(cleaned_query)
+                        if mode != SearchMode.graph:
+                            cleaned_query = _validate_ollama_rag_query(cleaned_query)
                         response_text = await self.rag.aquery(
                             cleaned_query, param=query_param
                         )

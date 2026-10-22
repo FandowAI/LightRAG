@@ -240,13 +240,14 @@ Use `QueryParam` to control the behavior of your query:
 class QueryParam:
     """Configuration parameters for query execution in LightRAG."""
 
-    mode: Literal["local", "global", "hybrid", "naive", "mix", "bypass"] = "mix"
+    mode: Literal["local", "global", "hybrid", "naive", "mix", "graph", "bypass"] = "mix"
     """Specifies the retrieval mode:
     - "local": Focuses on context-dependent information.
     - "global": Utilizes global knowledge.
     - "hybrid": Combines local and global retrieval methods.
     - "naive": Performs a basic search without advanced techniques.
     - "mix": Integrates knowledge graph and vector retrieval.
+    - "graph": Traverses from an exact entity identifier without vector retrieval.
     """
 
     only_need_context: bool = False
@@ -260,6 +261,9 @@ class QueryParam:
 
     stream: bool = False
     """If True, enables streaming output for real-time responses."""
+
+    graph_depth: int = 1
+    """Maximum hop depth for graph mode (0-5)."""
 
     top_k: int = int(os.getenv("TOP_K", "60"))
     """Number of top items to retrieve. Represents entities in 'local' mode and relationships in 'global' mode."""

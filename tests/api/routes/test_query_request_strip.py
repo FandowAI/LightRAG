@@ -12,6 +12,7 @@ _qr = importlib.import_module("lightrag.api.routers.query_routes")
 sys.argv = _original_argv
 
 QueryRequest = _qr.QueryRequest
+GraphQueryBatchRequest = _qr.GraphQueryBatchRequest
 
 pytestmark = pytest.mark.offline
 
@@ -41,7 +42,7 @@ def test_query_request_does_not_apply_rag_minimum_to_bypass(query):
     assert QueryRequest(query=query, mode="bypass").query == query.strip()
 
 
-@pytest.mark.parametrize("mode", ["mix", "naive", "bypass"])
+@pytest.mark.parametrize("mode", ["mix", "naive", "graph", "bypass"])
 @pytest.mark.parametrize("query", ["", "   ", "\t\n"])
 def test_query_request_rejects_an_empty_query_in_every_mode(mode, query):
     """`bypass` is exempt from the RAG minimum, not from carrying a prompt.
@@ -51,3 +52,34 @@ def test_query_request_rejects_an_empty_query_in_every_mode(mode, query):
     """
     with pytest.raises(ValidationError):
         QueryRequest(query=query, mode=mode)
+
+
+def test_graph_mode_accepts_single_character_entity_and_depth():
+    request = QueryRequest(query=" A ", mode="graph", graph_depth=2)
+
+    assert request.query == "A"
+    param = request.to_query_params(is_stream=True)
+    assert param.mode == "graph"
+    assert param.graph_depth == 2
+    assert param.stream is True
+
+
+def test_graph_batch_request_strips_entities_and_builds_graph_params():
+    request = GraphQueryBatchRequest(
+        entities=[" A ", "B"],
+        graph_depth=2,
+        deduplicate_relations=True,
+    )
+
+    assert request.entities == ["A", "B"]
+    param = request.to_query_params()
+    assert param.mode == "graph"
+    assert param.graph_depth == 2
+    assert param.only_need_context is True
+    assert param.enable_rerank is False
+
+
+@pytest.mark.parametrize("entities", [[], ["   "], ["A"] * 101])
+def test_graph_batch_request_rejects_invalid_entity_lists(entities):
+    with pytest.raises(ValidationError):
+        GraphQueryBatchRequest(entities=entities)

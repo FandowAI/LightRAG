@@ -61,11 +61,11 @@ export function meetsMinRagQueryWeight(query: string): boolean {
   return false
 }
 
-/** Every mode must carry a prompt — `bypass` and direct-LLM paths included. */
+/** Every mode must carry input — including exact-entity graph and direct-LLM paths. */
 export function isQueryEmpty(query: string): boolean {
   return query.trim().length === 0
 }
 
 export function isRagQueryTooShort(query: string, mode: QueryMode): boolean {
-  return mode !== 'bypass' && !meetsMinRagQueryWeight(query)
+  return mode !== 'bypass' && mode !== 'graph' && !meetsMinRagQueryWeight(query)
 }

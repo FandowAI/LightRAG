@@ -5,10 +5,11 @@ import { serializeQueryRequest } from './serializeQueryRequest'
 import type { QuerySettings } from '@/stores/querySettings'
 import type { MessageWithError } from '@/types/retrieval'
 
-const ALL_MODES = ['naive', 'local', 'global', 'hybrid', 'mix', 'bypass'] as const
+const ALL_MODES = ['naive', 'local', 'global', 'hybrid', 'mix', 'graph', 'bypass'] as const
 
 const baseSettings = (mode: (typeof ALL_MODES)[number]): QuerySettings => ({
   mode,
+  graph_depth: 2,
   top_k: 40,
   chunk_top_k: 20,
   max_entity_tokens: 6000,
@@ -47,6 +48,7 @@ describe('serializer equivalence', () => {
       // history_turns is a client-side expansion knob the server never
       // declared: it must be stripped from every request body.
       expect('history_turns' in a).toBe(false)
+      expect(a.graph_depth).toBe(2)
     }
   )
 

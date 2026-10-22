@@ -7,6 +7,7 @@ export const SUPPORTED_QUERY_MODES: readonly QueryMode[] = [
   'global',
   'hybrid',
   'mix',
+  'graph',
   'bypass'
 ]
 
