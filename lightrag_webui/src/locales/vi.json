@@ -464,8 +464,12 @@
         "global": "Global",
         "hybrid": "Hybrid",
         "mix": "Mix",
+        "graph": "Graph",
         "bypass": "Bypass"
       },
+      "graphDepth": "Độ sâu đồ thị",
+      "graphDepthTooltip": "Số bước quan hệ tối đa từ thực thể gốc khớp chính xác (0-5).",
+      "graphDepthPlaceholder": "Nhập độ sâu đồ thị",
       "responseFormat": "Định Dạng Phản Hồi",
       "responseFormatTooltip": "Xác định định dạng phản hồi. Ví dụ:\n• Nhiều Đoạn Văn\n• Một Đoạn Văn\n• Danh Sách Điểm",
       "responseFormatOptions": {

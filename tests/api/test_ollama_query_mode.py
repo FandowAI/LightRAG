@@ -10,6 +10,7 @@ import importlib
 import sys
 
 import pytest
+from fastapi import HTTPException
 
 _original_argv = sys.argv[:]
 sys.argv = [sys.argv[0]]
@@ -18,6 +19,7 @@ sys.argv = _original_argv
 
 SearchMode = _ollama_api.SearchMode
 parse_query_mode = _ollama_api.parse_query_mode
+graph_depth_from_options = _ollama_api.graph_depth_from_options
 
 pytestmark = pytest.mark.offline
 
@@ -55,6 +57,8 @@ pytestmark = pytest.mark.offline
         # Non-bracket forms are untouched by the fix.
         ("/local  tell me about X", ("tell me about X", SearchMode.local, False, None)),
         ("/globalcontext X", ("X", SearchMode.global_, True, None)),
+        ("/graph A", ("A", SearchMode.graph, False, None)),
+        ("/graphcontext A", ("A", SearchMode.graph, True, None)),
         ("tell me about X", ("tell me about X", SearchMode.mix, False, None)),
     ],
 )
@@ -82,7 +86,9 @@ def test_bracket_prompt_keeps_multiline_query(query, expected):
     assert parse_query_mode("/local line one\nline two")[0] == "line one\nline two"
 
 
-@pytest.mark.parametrize("mode_prefix", ["local", "global", "naive", "hybrid", "mix"])
+@pytest.mark.parametrize(
+    "mode_prefix", ["local", "global", "naive", "hybrid", "mix", "graph"]
+)
 def test_bracket_prompt_without_query_keeps_mode(mode_prefix):
     """Every space-suffixed mode key survives an empty trailing query."""
     cleaned, mode, only_need_context, user_prompt = parse_query_mode(
@@ -129,3 +135,19 @@ def test_unsuffixed_context_keys_end_at_a_word_boundary(query, expected):
     the user never asked for.
     """
     assert parse_query_mode(query) == expected
+
+
+@pytest.mark.parametrize(
+    "options, expected",
+    [(None, 1), ({}, 1), ({"graph_depth": 0}, 0), ({"graph_depth": 5}, 5)],
+)
+def test_graph_depth_from_ollama_options(options, expected):
+    assert graph_depth_from_options(options) == expected
+
+
+@pytest.mark.parametrize("value", [True, "2", -1, 6])
+def test_invalid_graph_depth_from_ollama_options_is_rejected(value):
+    with pytest.raises(HTTPException) as exc_info:
+        graph_depth_from_options({"graph_depth": value})
+
+    assert exc_info.value.status_code == 400

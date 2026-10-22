@@ -456,7 +456,7 @@
       "parametersScopeTooltip": "這些參數儲存在目前的瀏覽器中並持續生效，直到你再次修改；在同一瀏覽器上開啟的 /workspace 入口所發出的查詢同樣會使用它們。它們是瀏覽器本機狀態，而非伺服器全域策略：其他瀏覽器與其他裝置不受影響。",
       "parametersScopeHelpLabel": "關於參數適用範圍",
       "queryMode": "查詢模式",
-      "queryModeTooltip": "選擇檢索策略：\n• Naive：傳統文字塊向量檢索\n• Local：側重實體檢索\n• Global：側重關係檢索\n• Hybrid：Local+Global\n• Mix：Local+Global+Naive\n• Bypass：跳過檢索，把歷史會話與當前問題送LLM",
+      "queryModeTooltip": "選擇檢索策略：\n• Naive：傳統文字塊向量檢索\n• Local：側重實體檢索\n• Global：側重關係檢索\n• Hybrid：Local+Global\n• Mix：Local+Global+Naive\n• Graph：從精確實體起點遍歷知識圖譜\n• Bypass：跳過檢索，把歷史會話與當前問題送LLM",
       "queryModeWarning": "可能降低檢索品質",
       "queryModeOptions": {
         "naive": "Naive",
@@ -464,8 +464,12 @@
         "global": "Global",
         "hybrid": "Hybrid",
         "mix": "Mix",
+        "graph": "Graph",
         "bypass": "Bypass"
       },
+      "graphDepth": "圖遍歷深度",
+      "graphDepthTooltip": "從精確起始實體向外遍歷的最大關係跳數（0～5）。Graph 模式不執行關鍵字或向量檢索。",
+      "graphDepthPlaceholder": "輸入圖遍歷深度",
       "responseFormat": "回應格式",
       "responseFormatTooltip": "定義回應格式。例如：\n• 多段落\n• 單段落\n• 重點",
       "responseFormatOptions": {

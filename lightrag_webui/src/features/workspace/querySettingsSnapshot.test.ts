@@ -20,6 +20,7 @@ import { serializeQueryRequest } from '@/features/retrieval/serializeQueryReques
 /** Every setting at a value distinguishable from its default. */
 const NON_DEFAULT_SETTINGS: QuerySettings = {
   mode: 'local',
+  graph_depth: 4,
   top_k: 11,
   chunk_top_k: 7,
   max_entity_tokens: 1234,

@@ -83,6 +83,10 @@ describe('RAG query validation', () => {
     expect(isRagQueryTooShort('a', 'bypass')).toBe(false)
   })
 
+  test('does not impose the RAG minimum on exact graph entities', () => {
+    expect(isRagQueryTooShort('A', 'graph')).toBe(false)
+  })
+
   test('flags an empty query independently of the mode', () => {
     // Exemption from the minimum is not exemption from carrying a prompt.
     expect(isQueryEmpty('')).toBe(true)

@@ -528,7 +528,7 @@
       "parametersScopeTooltip": "这些参数保存在当前浏览器中并长期生效，直到你再次修改；在同一浏览器上打开的 /workspace 入口发起的查询同样使用它们。它们是浏览器本地状态，不是服务端全局策略：其他浏览器和设备不受影响。",
       "parametersScopeHelpLabel": "关于参数作用范围",
       "queryMode": "查询模式",
-      "queryModeTooltip": "选择检索策略：\n• Naive：传统文本块向量检索\n• Local：侧重实体检索\n• Global：侧重关系检索\n• Hybrid：Local+Global\n• Mix：Local+Global+Naive\n• Bypass：跳过检索,把历史会话与当前问题送LLM",
+      "queryModeTooltip": "选择检索策略：\n• Naive：传统文本块向量检索\n• Local：侧重实体检索\n• Global：侧重关系检索\n• Hybrid：Local+Global\n• Mix：Local+Global+Naive\n• Graph：从精确实体起点遍历知识图谱\n• Bypass：跳过检索,把历史会话与当前问题送LLM",
       "queryModeWarning": "可能降低检索质量",
       "queryModeOptions": {
         "naive": "Naive",
@@ -536,8 +536,12 @@
         "global": "Global",
         "hybrid": "Hybrid",
         "mix": "Mix",
+        "graph": "Graph",
         "bypass": "Bypass"
       },
+      "graphDepth": "图遍历深度",
+      "graphDepthTooltip": "从精确起始实体向外遍历的最大关系跳数（0～5）。Graph 模式不执行关键词或向量检索。",
+      "graphDepthPlaceholder": "输入图遍历深度",
       "responseFormat": "响应格式",
       "responseFormatTooltip": "定义响应格式。例如：\n• 多段落\n• 单段落\n• 要点",
       "responseFormatOptions": {

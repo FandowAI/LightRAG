@@ -464,8 +464,12 @@
         "global": "Global",
         "hybrid": "Hybrid",
         "mix": "Mix",
+        "graph": "Graph",
         "bypass": "Bypass"
       },
+      "graphDepth": "Graph-Tiefe",
+      "graphDepthTooltip": "Maximale Anzahl von Beziehungssprüngen ab der exakt passenden Startentität (0-5).",
+      "graphDepthPlaceholder": "Graph-Tiefe eingeben",
       "responseFormat": "Antwortformat",
       "responseFormatTooltip": "Definiert das Antwortformat. Beispiele:\n• Mehrere Absätze\n• Einzelner Absatz\n• Aufzählungspunkte",
       "responseFormatOptions": {

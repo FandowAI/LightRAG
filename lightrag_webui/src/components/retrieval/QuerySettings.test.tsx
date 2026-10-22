@@ -49,6 +49,28 @@ describe('structured context option', () => {
   })
 })
 
+describe('graph mode depth', () => {
+  afterEach(() => {
+    cleanup()
+    useQuerySettingsStore.setState({ querySettings: { ...defaultQuerySettings } })
+  })
+
+  test('shows the bounded depth control only in graph mode', () => {
+    renderWithProviders(<QuerySettings />)
+    expect(screen.queryAllByRole('spinbutton', { name: strings.graphDepth })).toHaveLength(0)
+    cleanup()
+
+    useQuerySettingsStore.setState({
+      querySettings: { ...defaultQuerySettings, mode: 'graph' }
+    })
+    renderWithProviders(<QuerySettings />)
+    const input = screen.getByRole('spinbutton', { name: strings.graphDepth })
+    expect(input.getAttribute('min')).toBe('0')
+    expect(input.getAttribute('max')).toBe('5')
+    expect((input as HTMLInputElement).value).toBe('1')
+  })
+})
+
 describe('QuerySettings scope notice', () => {
   afterEach(() => {
     cleanup()

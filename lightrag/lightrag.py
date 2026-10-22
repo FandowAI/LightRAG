@@ -142,9 +142,14 @@ from lightrag.query_validation import validate_query_not_empty, validate_rag_que
 from lightrag.chunker import chunking_by_token_size
 from lightrag.operate import (
     KGRebuildReport,
+    GraphTraversalResult,
+    _graph_raw_data_from_traversal,
+    _traverse_graph_from_entity,
     _truncate_vdb_content,
     collect_kg_merge_candidates,
     extract_entities,
+    graph_query,
+    graph_query_data,
     kg_query,
     merge_nodes_and_edges,
     naive_query,
@@ -4973,7 +4978,7 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
                     ]
                 },
                 "metadata": {
-                    "query_mode": str,           # Query mode used ("local", "global", "hybrid", "mix", "naive", "bypass")
+                    "query_mode": str,           # Query mode used ("local", "global", "hybrid", "mix", "naive", "graph", "bypass")
                     "keywords": {
                         "high_level": List[str], # High-level keywords extracted
                         "low_level": List[str]   # Low-level keywords extracted
@@ -4996,6 +5001,7 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
             - **hybrid**: Combines local and global results using round-robin merging
             - **mix**: Includes knowledge graph data plus vector-retrieved document chunks
             - **naive**: Only vector-retrieved chunks, entities and relationships arrays are empty
+            - **graph**: Traverses from an exact entity root and resolves its source chunks
             - **bypass**: All data arrays are empty, used for direct LLM queries
 
             ** processing_info is optional and may not be present in all responses, especially when query result is empty**
@@ -5020,10 +5026,10 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
             actual data is nested under the 'data' field, with 'status' and 'message'
             fields at the top level.
         """
-        # `bypass` skips retrieval, so the RAG minimum does not apply to it —
-        # but no mode may forward an empty prompt to the LLM.
+        # `bypass` skips retrieval and `graph` accepts exact one-character
+        # entity IDs, so the generic RAG minimum does not apply to either.
         query = validate_query_not_empty(query)
-        if param.mode != "bypass":
+        if param.mode not in ("bypass", "graph"):
             query = validate_rag_query(query)
 
         global_config = self._build_global_config()
@@ -5046,6 +5052,7 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
             user_prompt=param.user_prompt,
             disable_user_prompt_prefix=param.disable_user_prompt_prefix,
             enable_rerank=param.enable_rerank,
+            graph_depth=param.graph_depth,
         )
 
         query_result = None
@@ -5063,6 +5070,16 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
                 hashing_kv=self.llm_response_cache,
                 system_prompt=None,
                 chunks_vdb=self.chunks_vdb,
+            )
+        elif data_param.mode == "graph":
+            logger.debug("[aquery_data] Using graph_query_data")
+            query_result = await graph_query_data(
+                query,
+                self.chunk_entity_relation_graph,
+                self.text_chunks,
+                self.entity_chunks,
+                self.relation_chunks,
+                data_param,
             )
         elif data_param.mode == "naive":
             logger.debug(f"[aquery_data] Using naive_query for mode: {data_param.mode}")
@@ -5122,6 +5139,183 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
         await self._query_done()
         return final_data
 
+    async def aquery_data_batch(
+        self,
+        entities: list[str],
+        param: QueryParam,
+        *,
+        deduplicate_relations: bool = True,
+        deduplicate_chunks_in_batch: bool = False,
+    ) -> dict[str, Any]:
+        """Run ordered graph queries, pruning branches through earlier root entities."""
+
+        if param.mode != "graph":
+            raise ValueError("aquery_data_batch only supports graph mode")
+
+        if not 0 <= param.graph_depth <= 5:
+            raise ValueError("graph_depth must be between 0 and 5")
+
+        processed_roots: set[str] = set()
+        returned_unique_edges: set[tuple[str, str]] = set()
+        returned_relationships = 0
+        processed_chunks: set[str] = set()
+        results: list[dict[str, Any]] = []
+        successful = 0
+
+        for requested_entity in entities:
+            root_entity = normalize_entity_name(requested_entity)
+            traversal = await _traverse_graph_from_entity(
+                root_entity,
+                param.graph_depth,
+                self.chunk_entity_relation_graph,
+            )
+            if traversal is None:
+                results.append(
+                    {
+                        "entity": requested_entity,
+                        "data": {
+                            "status": "failure",
+                            "message": "Query returned no results",
+                            "data": {},
+                            "metadata": {
+                                "failure_reason": "no_results",
+                                "mode": "graph",
+                                "requested_entity": requested_entity,
+                                "root_entity": root_entity,
+                                "graph_depth": param.graph_depth,
+                            },
+                        },
+                    }
+                )
+                continue
+
+            successful += 1
+            candidate_pairs = set(traversal.relations)
+            if deduplicate_relations:
+                # Earlier requested roots act as traversal barriers. This cuts
+                # a path such as E-B-C after B was processed, without removing
+                # E's own other branches (for example E-G and E-F), even when
+                # those relationships also appeared in B's result.
+                removed_relation_pairs = {
+                    pair
+                    for pair in candidate_pairs
+                    if pair[0] in processed_roots or pair[1] in processed_roots
+                }
+                available_relation_pairs = (
+                    candidate_pairs - removed_relation_pairs
+                )
+            else:
+                available_relation_pairs = candidate_pairs
+                removed_relation_pairs = set()
+
+            # Cutting a processed root can leave deeper candidate edges behind
+            # the barrier. Keep only the component still reachable from this
+            # request's root so every returned relationship has a valid path.
+            available_adjacency: dict[str, set[str]] = {}
+            for src_id, tgt_id in available_relation_pairs:
+                available_adjacency.setdefault(src_id, set()).add(tgt_id)
+                available_adjacency.setdefault(tgt_id, set()).add(src_id)
+            reachable_nodes = {root_entity}
+            pending_nodes = [root_entity]
+            while pending_nodes:
+                current_entity = pending_nodes.pop()
+                for neighbor in sorted(
+                    available_adjacency.get(current_entity, set()), reverse=True
+                ):
+                    if neighbor not in reachable_nodes:
+                        reachable_nodes.add(neighbor)
+                        pending_nodes.append(neighbor)
+            kept_relation_pairs = {
+                pair
+                for pair in available_relation_pairs
+                if pair[0] in reachable_nodes and pair[1] in reachable_nodes
+            }
+            skipped_disconnected_pairs = (
+                available_relation_pairs - kept_relation_pairs
+            )
+            returned_unique_edges.update(kept_relation_pairs)
+            returned_relationships += len(kept_relation_pairs)
+            processed_roots.add(root_entity)
+
+            kept_entity_names = {root_entity}
+            for src_id, tgt_id in kept_relation_pairs:
+                kept_entity_names.add(src_id)
+                kept_entity_names.add(tgt_id)
+
+            filtered_traversal = GraphTraversalResult(
+                root_entity=root_entity,
+                nodes={
+                    entity_name: node_data
+                    for entity_name, node_data in traversal.nodes.items()
+                    if entity_name in kept_entity_names
+                },
+                relations={
+                    pair: edge_data
+                    for pair, edge_data in traversal.relations.items()
+                    if pair in kept_relation_pairs
+                },
+                is_truncated=traversal.is_truncated,
+                node_depths={
+                    entity_name: depth
+                    for entity_name, depth in traversal.node_depths.items()
+                    if entity_name in kept_entity_names
+                },
+            )
+            result = await _graph_raw_data_from_traversal(
+                requested_entity,
+                param.graph_depth,
+                filtered_traversal,
+                self.text_chunks,
+                self.entity_chunks,
+                self.relation_chunks,
+                candidate_nodes=len(traversal.nodes),
+                candidate_relationships=len(traversal.relations),
+                deduplicated_relationships=[
+                    make_relation_chunk_key(*pair)
+                    for pair in sorted(removed_relation_pairs)
+                ],
+                exclude_chunk_ids=processed_chunks
+                if deduplicate_chunks_in_batch
+                else None,
+            )
+            result.setdefault("metadata", {}).update(
+                {
+                    "skipped_disconnected_relationships": [
+                        make_relation_chunk_key(*pair)
+                        for pair in sorted(skipped_disconnected_pairs)
+                    ],
+                    "skipped_disconnected_relationship_count": len(
+                        skipped_disconnected_pairs
+                    ),
+                }
+            )
+            processed_chunks.update(
+                chunk["chunk_id"]
+                for chunk in result.get("data", {}).get("chunks", [])
+                if chunk.get("chunk_id")
+            )
+            results.append({"entity": requested_entity, "data": result})
+
+        await self._query_done()
+        status = "success" if successful == len(entities) else "partial_success"
+        if successful == 0:
+            status = "failure"
+        return {
+            "status": status,
+            "results": results,
+            "metadata": {
+                "requested_entities": len(entities),
+                "processed_entities": successful,
+                "processed_roots": sorted(processed_roots),
+                "returned_relationships": returned_relationships,
+                "unique_relationships": len(returned_unique_edges),
+                "repeated_relationships": (
+                    returned_relationships - len(returned_unique_edges)
+                ),
+                "unique_chunks": len(processed_chunks),
+            },
+        }
+
     async def aquery_llm(
         self,
         query: str,
@@ -5143,10 +5337,10 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
         Returns:
             dict[str, Any]: Complete response with structured data and LLM response.
         """
-        # `bypass` skips retrieval, so the RAG minimum does not apply to it —
-        # but no mode may forward an empty prompt to the LLM.
+        # `bypass` skips retrieval and `graph` accepts exact one-character
+        # entity IDs, so the generic RAG minimum does not apply to either.
         query = validate_query_not_empty(query)
-        if param.mode != "bypass":
+        if param.mode not in ("bypass", "graph"):
             query = validate_rag_query(query)
 
         logger.debug(f"[aquery_llm] Query param: {param}")
@@ -5168,6 +5362,19 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
                     hashing_kv=self.llm_response_cache,
                     system_prompt=system_prompt,
                     chunks_vdb=self.chunks_vdb,
+                    progress_callback=progress_callback,
+                )
+            elif param.mode == "graph":
+                query_result = await graph_query(
+                    query,
+                    self.chunk_entity_relation_graph,
+                    self.text_chunks,
+                    self.entity_chunks,
+                    self.relation_chunks,
+                    param,
+                    global_config,
+                    hashing_kv=self.llm_response_cache,
+                    system_prompt=system_prompt,
                     progress_callback=progress_callback,
                 )
             elif param.mode == "naive":
