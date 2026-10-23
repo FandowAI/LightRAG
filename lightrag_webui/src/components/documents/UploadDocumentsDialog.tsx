@@ -24,6 +24,7 @@ import { getSupportedFileTypes, uploadDocument } from '@/api/lightrag'
 
 import { UploadIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import FolderUpload from '@/components/documents/FolderUpload'
 
 interface UploadDocumentsDialogProps {
   onDocumentsUploaded?: () => Promise<void>
@@ -73,7 +74,9 @@ export default function UploadDocumentsDialog({
       // Process rejected files and add them to fileErrors
       rejectedFiles.forEach(({ file, errors }) => {
         // Get the first error message
-        let errorMsg = errors[0]?.message || t('documentPanel.uploadDocuments.fileUploader.fileRejected', { name: file.name })
+        let errorMsg =
+          errors[0]?.message ||
+          t('documentPanel.uploadDocuments.fileUploader.fileRejected', { name: file.name })
 
         // Simplify error message for unsupported file types
         if (errorMsg.includes('file-invalid-type')) {
@@ -87,7 +90,7 @@ export default function UploadDocumentsDialog({
         }))
 
         // Add error message to fileErrors
-        setFileErrors(prev => ({
+        setFileErrors((prev) => ({
           ...prev,
           [file.name]: errorMsg
         }))
@@ -102,13 +105,13 @@ export default function UploadDocumentsDialog({
       let hasSuccessfulUpload = false
 
       // Only clear errors for files that are being uploaded, keep errors for rejected files
-      setFileErrors(prev => {
-        const newErrors = { ...prev };
-        filesToUpload.forEach(file => {
-          delete newErrors[file.name];
-        });
-        return newErrors;
-      });
+      setFileErrors((prev) => {
+        const newErrors = { ...prev }
+        filesToUpload.forEach((file) => {
+          delete newErrors[file.name]
+        })
+        return newErrors
+      })
 
       // Show uploading toast
       const toastId = toast.loading(t('documentPanel.uploadDocuments.batch.uploading'))
@@ -120,12 +123,10 @@ export default function UploadDocumentsDialog({
 
         // Create a collator that supports Chinese sorting
         const collator = new Intl.Collator(['zh-CN', 'en'], {
-          sensitivity: 'accent',  // consider basic characters, accents, and case
-          numeric: true           // enable numeric sorting, e.g., "File 10" will be after "File 2"
-        });
-        const sortedFiles = [...filesToUpload].sort((a, b) =>
-          collator.compare(a.name, b.name)
-        );
+          sensitivity: 'accent', // consider basic characters, accents, and case
+          numeric: true // enable numeric sorting, e.g., "File 10" will be after "File 2"
+        })
+        const sortedFiles = [...filesToUpload].sort((a, b) => collator.compare(a.name, b.name))
 
         // Upload files in sequence, not parallel
         for (const file of sortedFiles) {
@@ -137,7 +138,12 @@ export default function UploadDocumentsDialog({
             }))
 
             const result = await uploadDocument(file, (percentCompleted: number) => {
-              console.debug(t('documentPanel.uploadDocuments.single.uploading', { name: file.name, percent: percentCompleted }))
+              console.debug(
+                t('documentPanel.uploadDocuments.single.uploading', {
+                  name: file.name,
+                  percent: percentCompleted
+                })
+              )
               setProgresses((pre) => ({
                 ...pre,
                 [file.name]: percentCompleted
@@ -146,7 +152,7 @@ export default function UploadDocumentsDialog({
 
             if (result.status !== 'success') {
               uploadErrors[file.name] = result.message
-              setFileErrors(prev => ({
+              setFileErrors((prev) => ({
                 ...prev,
                 [file.name]: result.message
               }))
@@ -167,7 +173,9 @@ export default function UploadDocumentsDialog({
 
             // If it's an axios error with response data, try to extract more detailed error info
             if (err && typeof err === 'object' && 'response' in err) {
-              const axiosError = err as { response?: { status: number, data?: { detail?: string } } }
+              const axiosError = err as {
+                response?: { status: number; data?: { detail?: string } }
+              }
               const status = axiosError.response?.status
               const detail = axiosError.response?.data?.detail
               if (status === 409) {
@@ -203,7 +211,7 @@ export default function UploadDocumentsDialog({
 
             // Record error message in both local tracking and state
             uploadErrors[file.name] = errorMsg
-            setFileErrors(prev => ({
+            setFileErrors((prev) => ({
               ...prev,
               [file.name]: errorMsg
             }))
@@ -224,14 +232,16 @@ export default function UploadDocumentsDialog({
         if (hasSuccessfulUpload) {
           // Refresh document list
           if (onDocumentsUploaded) {
-            onDocumentsUploaded().catch(err => {
+            onDocumentsUploaded().catch((err) => {
               console.error('Error refreshing documents:', err)
             })
           }
         }
       } catch (err) {
         console.error('Unexpected error during upload:', err)
-        toast.error(t('documentPanel.uploadDocuments.generalError', { error: errorMessage(err) }), { id: toastId })
+        toast.error(t('documentPanel.uploadDocuments.generalError', { error: errorMessage(err) }), {
+          id: toastId
+        })
       } finally {
         setIsUploading(false)
       }
@@ -262,17 +272,29 @@ export default function UploadDocumentsDialog({
       }}
     >
       <DialogTrigger asChild>
-        <Button variant="default" side="bottom" tooltip={t('documentPanel.uploadDocuments.tooltip')} size="sm">
+        <Button
+          variant="default"
+          side="bottom"
+          tooltip={t('documentPanel.uploadDocuments.tooltip')}
+          size="sm"
+        >
           <UploadIcon /> {t('documentPanel.uploadDocuments.button')}
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-xl" onCloseAutoFocus={(e) => e.preventDefault()}>
+      <DialogContent
+        className="max-h-[90dvh] overflow-y-auto sm:max-w-xl"
+        onCloseAutoFocus={(e) => e.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle>{t('documentPanel.uploadDocuments.title')}</DialogTitle>
-          <DialogDescription>
-            {t('documentPanel.uploadDocuments.description')}
-          </DialogDescription>
+          <DialogDescription>{t('documentPanel.uploadDocuments.description')}</DialogDescription>
         </DialogHeader>
+        <FolderUpload
+          disabled={isUploading || uploaderInputs.disabled}
+          onBusyChange={setIsUploading}
+          onAccepted={onUploadBatchAccepted}
+          onComplete={onDocumentsUploaded}
+        />
         <FileUploader
           maxFileCount={Infinity}
           maxSize={200 * 1024 * 1024}

@@ -56,9 +56,11 @@ def create_entity_merge_routes(
                 409, "Graph settings editing requires one server worker"
             )
         try:
-            return manager.save(
+            result = manager.save(
                 body.revision, EntityMergeSettings(**body.settings.model_dump())
             )
+            result["write_enabled"] = True
+            return result
         except StaleEntityMergeRevision as exc:
             raise HTTPException(409, str(exc)) from exc
         except ValueError as exc:

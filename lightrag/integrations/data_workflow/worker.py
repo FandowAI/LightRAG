@@ -9,6 +9,7 @@ import traceback
 from pathlib import Path
 
 from .config import BridgeSettings
+from .batch_source import BatchSnapshot, read_batch_results
 from .conversion import convert_result
 from .execution import execute
 from .inputs import read_results
@@ -20,11 +21,18 @@ def prepare(
     store: JobStore, job_id: str, settings: BridgeSettings, directory: Path
 ) -> None:
     seen = accepted = rejected = 0
+    if store.get(job_id).get("source", {}).get("type") == "batch":
+        snapshot = BatchSnapshot.model_validate_json(
+            (directory / "batch-source.json").read_text()
+        )
+        results = read_batch_results(snapshot, settings.limits)
+    else:
+        results = read_results(settings)
     with (
         (directory / "input.jsonl.part").open("w", encoding="utf-8") as output,
         (directory / "rejected.jsonl").open("w", encoding="utf-8") as failures,
     ):
-        for result, read_error in read_results(settings):
+        for result, read_error in results:
             seen += 1
             try:
                 if read_error:

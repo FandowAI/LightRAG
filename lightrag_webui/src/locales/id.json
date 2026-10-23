@@ -464,8 +464,12 @@
         "global": "Global",
         "hybrid": "Hybrid",
         "mix": "Mix",
+        "graph": "Graph",
         "bypass": "Bypass"
       },
+      "graphDepth": "Kedalaman Graf",
+      "graphDepthTooltip": "Jumlah maksimum lompatan relasi dari entitas akar yang cocok persis (0-5).",
+      "graphDepthPlaceholder": "Masukkan kedalaman graf",
       "responseFormat": "Format Respons",
       "responseFormatTooltip": "Menentukan format respons. Contoh:\n• Beberapa Paragraf\n• Satu Paragraf\n• Poin-poin",
       "responseFormatOptions": {

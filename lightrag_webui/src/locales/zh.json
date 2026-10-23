@@ -51,7 +51,12 @@
     "historyHelp": "每次保存草稿、发布和恢复默认都会留一份快照。载入历史版本只会打开编辑器，不会立即改动运行中的提示词。",
     "noHistory": "还没有保存过版本。",
     "loadVersion": "载入编辑器",
-    "historyAction": { "draft": "保存草稿", "publish": "发布版本", "reset": "恢复中文默认前", "reset_english": "恢复英文原版前" },
+    "historyAction": {
+      "draft": "保存草稿",
+      "publish": "发布版本",
+      "reset": "恢复中文默认前",
+      "reset_english": "恢复英文原版前"
+    },
     "lifecycleHelp": "编辑后点击“发布生效”会保存并发布；下拉菜单可只保存草稿。恢复按钮默认使用当前配置的中文版，下拉可切换项目英文原版；恢复会立即生效并保留历史。",
     "discardEdits": "放弃未保存修改",
     "saveDraft": "保存草稿",
@@ -61,36 +66,102 @@
     "published": "已发布，后续请求将使用新版本",
     "resetDone": "已恢复当前配置默认（中文）",
     "resetDoneEnglish": "已恢复项目英文原版",
-    "status": { "active": "当前使用", "conditional": "按条件触发", "inactive": "当前未使用" },
-    "section": { "document": "文档理解", "ingestion": "图谱入库", "query": "查询回答" },
-    "card": { "image": "图片分析", "table": "表格分析", "equation": "公式分析", "docx": "DOCX 智能标题", "extraction": "实体与关系抽取", "gleaning": "遗漏补抽", "merge": "描述合并", "keywords": "关键词拆解", "graph": "图谱模式回答", "naive": "Naive 回答" },
-    "variant": { "json": "JSON 结果", "text": "纯文本结果" },
+    "status": {
+      "active": "当前使用",
+      "conditional": "按条件触发",
+      "inactive": "当前未使用"
+    },
+    "section": {
+      "document": "文档理解",
+      "ingestion": "图谱入库",
+      "query": "查询回答"
+    },
+    "card": {
+      "image": "图片分析",
+      "table": "表格分析",
+      "equation": "公式分析",
+      "docx": "DOCX 智能标题",
+      "extraction": "实体与关系抽取",
+      "gleaning": "遗漏补抽",
+      "merge": "描述合并",
+      "keywords": "关键词拆解",
+      "graph": "图谱模式回答",
+      "naive": "Naive 回答"
+    },
+    "variant": {
+      "json": "JSON 结果",
+      "text": "纯文本结果"
+    },
     "field": {
-      "image_analysis": "图片分析指令", "table_analysis": "表格分析指令", "equation_analysis": "公式分析指令",
-      "docx_title_system": "系统指令", "docx_title_user": "用户指令",
-      "entity_extraction_json_system_prompt": "系统指令", "entity_extraction_json_user_prompt": "用户指令",
-      "entity_extraction_system_prompt": "系统指令", "entity_extraction_user_prompt": "用户指令",
+      "image_analysis": "图片分析指令",
+      "table_analysis": "表格分析指令",
+      "equation_analysis": "公式分析指令",
+      "docx_title_system": "系统指令",
+      "docx_title_user": "用户指令",
+      "entity_extraction_json_system_prompt": "系统指令",
+      "entity_extraction_json_user_prompt": "用户指令",
+      "entity_extraction_system_prompt": "系统指令",
+      "entity_extraction_user_prompt": "用户指令",
       "default_entity_types_guidance": "实体类型说明（两种抽取格式共用）",
-      "entity_extraction_json_examples": "JSON 输出示例", "entity_extraction_examples": "纯文本输出示例",
+      "entity_extraction_json_examples": "JSON 输出示例",
+      "entity_extraction_examples": "纯文本输出示例",
       "entity_extraction_section_context": "章节背景（两种抽取格式共用）",
-      "entity_continue_extraction_json_user_prompt": "补抽指令（JSON）", "entity_continue_extraction_user_prompt": "补抽指令（纯文本）",
-      "summarize_entity_descriptions": "描述合并指令", "keywords_extraction": "关键词拆解指令", "keywords_extraction_examples": "关键词输出示例",
-      "rag_response": "图谱回答指令", "kg_query_context": "图谱上下文格式", "naive_rag_response": "Naive 回答指令", "naive_query_context": "文本块上下文格式",
+      "entity_continue_extraction_json_user_prompt": "补抽指令（JSON）",
+      "entity_continue_extraction_user_prompt": "补抽指令（纯文本）",
+      "summarize_entity_descriptions": "描述合并指令",
+      "keywords_extraction": "关键词拆解指令",
+      "keywords_extraction_examples": "关键词输出示例",
+      "rag_response": "图谱回答指令",
+      "kg_query_context": "图谱上下文格式",
+      "naive_rag_response": "Naive 回答指令",
+      "naive_query_context": "文本块上下文格式",
       "user_prompt_prefix": "全局回答要求（两种回答模式共用）"
     },
     "reason": {
-      "image_analysis": { "inactive": "当前 Markdown 解析未启用图片分析，或图片 VLM 未开启。编辑这份提示词不会自动启用图片处理。", "conditional": "Markdown 中出现可分析图片且 VLM 可用时才调用。" },
-      "table_analysis": { "inactive": "当前 Markdown 解析未启用表格分析。", "conditional": "Markdown 中识别到表格时调用。" },
-      "equation_analysis": { "inactive": "当前 Markdown 解析未启用公式分析。", "conditional": "Markdown 中识别到块级公式时调用。" },
-      "docx_title": { "inactive": "DOCX 智能标题当前未启用；Markdown 文件不会使用这份提示词。", "conditional": "只在符合条件的 DOCX 标题区域调用；Markdown 文件不会使用。" },
-      "extraction_json": { "active": "当前实体抽取采用 JSON 输出，Markdown 文本块也使用这一套。", "inactive": "当前实体抽取采用纯文本输出，因此此版本未使用。" },
-      "extraction_text": { "active": "当前实体抽取采用分隔符纯文本输出；这与上传 Markdown 文件格式无关。", "inactive": "当前实体抽取采用 JSON 输出。纯文本结果是另一种模型输出协议，与上传 Markdown 无关。" },
-      "gleaning_json": { "conditional": "JSON 初抽后按需补抽；令牌预算不足时可能跳过。", "inactive": "当前未采用 JSON 抽取，或补抽次数设为零。" },
-      "gleaning_text": { "conditional": "纯文本初抽后按需补抽；令牌预算不足时可能跳过。", "inactive": "当前未采用纯文本抽取，或补抽次数设为零。" },
-      "description_merge": { "conditional": "同名实体或关系有多条需要合并的描述时调用。" },
-      "keywords": { "conditional": "图谱检索需要拆关键词时调用；直接提供关键词或命中缓存则跳过。" },
-      "graph_answer": { "conditional": "local、global、hybrid、mix 模式生成最终回答时调用；仅需上下文时不调用回答模型。" },
-      "naive_answer": { "conditional": "Naive 模式生成最终回答时调用；仅需上下文时不调用回答模型。" }
+      "image_analysis": {
+        "inactive": "当前 Markdown 解析未启用图片分析，或图片 VLM 未开启。编辑这份提示词不会自动启用图片处理。",
+        "conditional": "Markdown 中出现可分析图片且 VLM 可用时才调用。"
+      },
+      "table_analysis": {
+        "inactive": "当前 Markdown 解析未启用表格分析。",
+        "conditional": "Markdown 中识别到表格时调用。"
+      },
+      "equation_analysis": {
+        "inactive": "当前 Markdown 解析未启用公式分析。",
+        "conditional": "Markdown 中识别到块级公式时调用。"
+      },
+      "docx_title": {
+        "inactive": "DOCX 智能标题当前未启用；Markdown 文件不会使用这份提示词。",
+        "conditional": "只在符合条件的 DOCX 标题区域调用；Markdown 文件不会使用。"
+      },
+      "extraction_json": {
+        "active": "当前实体抽取采用 JSON 输出，Markdown 文本块也使用这一套。",
+        "inactive": "当前实体抽取采用纯文本输出，因此此版本未使用。"
+      },
+      "extraction_text": {
+        "active": "当前实体抽取采用分隔符纯文本输出；这与上传 Markdown 文件格式无关。",
+        "inactive": "当前实体抽取采用 JSON 输出。纯文本结果是另一种模型输出协议，与上传 Markdown 无关。"
+      },
+      "gleaning_json": {
+        "conditional": "JSON 初抽后按需补抽；令牌预算不足时可能跳过。",
+        "inactive": "当前未采用 JSON 抽取，或补抽次数设为零。"
+      },
+      "gleaning_text": {
+        "conditional": "纯文本初抽后按需补抽；令牌预算不足时可能跳过。",
+        "inactive": "当前未采用纯文本抽取，或补抽次数设为零。"
+      },
+      "description_merge": {
+        "conditional": "同名实体或关系有多条需要合并的描述时调用。"
+      },
+      "keywords": {
+        "conditional": "图谱检索需要拆关键词时调用；直接提供关键词或命中缓存则跳过。"
+      },
+      "graph_answer": {
+        "conditional": "local、global、hybrid、mix 模式生成最终回答时调用；仅需上下文时不调用回答模型。"
+      },
+      "naive_answer": {
+        "conditional": "Naive 模式生成最终回答时调用；仅需上下文时不调用回答模型。"
+      }
     }
   },
   "login": {
@@ -220,6 +291,7 @@
         "select": "选择"
       },
       "filters": {
+        "skipped": "重复已跳过",
         "all": "全部",
         "completed": "已完成",
         "parse": "文件解析",
@@ -228,6 +300,7 @@
         "failed": "失败"
       },
       "status": {
+        "skipped": "重复已跳过",
         "all": "全部",
         "completed": "已完成",
         "preprocessed": "预处理",
@@ -528,7 +601,7 @@
       "parametersScopeTooltip": "这些参数保存在当前浏览器中并长期生效，直到你再次修改；在同一浏览器上打开的 /workspace 入口发起的查询同样使用它们。它们是浏览器本地状态，不是服务端全局策略：其他浏览器和设备不受影响。",
       "parametersScopeHelpLabel": "关于参数作用范围",
       "queryMode": "查询模式",
-      "queryModeTooltip": "选择检索策略：\n• Naive：传统文本块向量检索\n• Local：侧重实体检索\n• Global：侧重关系检索\n• Hybrid：Local+Global\n• Mix：Local+Global+Naive\n• Bypass：跳过检索,把历史会话与当前问题送LLM",
+      "queryModeTooltip": "选择检索策略：\n• Naive：传统文本块向量检索\n• Local：侧重实体检索\n• Global：侧重关系检索\n• Hybrid：Local+Global\n• Mix：Local+Global+Naive\n• Graph：从精确实体起点遍历知识图谱\n• Bypass：跳过检索,把历史会话与当前问题送LLM",
       "queryModeWarning": "可能降低检索质量",
       "queryModeOptions": {
         "naive": "Naive",
@@ -536,8 +609,12 @@
         "global": "Global",
         "hybrid": "Hybrid",
         "mix": "Mix",
+        "graph": "Graph",
         "bypass": "Bypass"
       },
+      "graphDepth": "图遍历深度",
+      "graphDepthTooltip": "从精确起始实体向外遍历的最大关系跳数（0～5）。Graph 模式不执行关键词或向量检索。",
+      "graphDepthPlaceholder": "输入图遍历深度",
       "responseFormat": "响应格式",
       "responseFormatTooltip": "定义响应格式。例如：\n• 多段落\n• 单段落\n• 要点",
       "responseFormatOptions": {
@@ -622,6 +699,11 @@
     "quotaDropped": "浏览器存储空间已满：聊天历史已停止保存。当前对话在离开页面前仍然可见。"
   },
   "entityMerge": {
+    "identityDescription": "先查已确认词表，再由模型核对身份和原文证据。不确定时分开保留。",
+    "identityRules": "相似度仅用于寻找候选；归属冲突不合并；合并必须有已确认词表或原文证据。",
+    "identityEnabled": "启用模型身份核对（已确认词表始终生效）",
+    "identityHint": "候选分数不是身份确认结果。设置仅对后续写入生效，不自动修改历史图谱。",
+    "identityPreview": "仅展示名称候选；实际写入时自动核对身份和原文证据。",
     "button": "图谱写入设置",
     "title": "实体语义合并",
     "description": "只在图谱写入时比较实体名称向量。保存后对后续文档生效。",
@@ -646,5 +728,128 @@
     "merge": "合并到",
     "exactName": "已有完全同名实体",
     "create": "创建新实体"
+  },
+  "distillation": {
+    "start_prepared": "启动已准备任务",
+    "progress_title": "蒸馏任务进度",
+    "submitted": "蒸馏任务已创建",
+    "submitting": "正在提交…",
+    "restoring": "正在恢复蒸馏任务…",
+    "configuration_pending": "请先完成 data-work-flow 配置，再启动蒸馏。",
+    "processing": "工作流正在运行",
+    "counts": "已读取 {{seen}} · 已接收 {{accepted}} · 已拒绝 {{rejected}} · 已处理 {{processed}} 条输入",
+    "unknown": "未知",
+    "details": "任务详情与日志",
+    "job_id": "任务 ID",
+    "load_logs": "加载更多日志",
+    "logs": "蒸馏日志",
+    "no_logs": "尚未加载日志",
+    "log_error": "日志加载失败，请重试。",
+    "errors": {
+      "connection": "暂时无法更新蒸馏状态，正在重连…",
+      "submit": "暂时无法确认任务是否创建，重试会找回同一任务。"
+    },
+    "status": {
+      "preparing": "正在准备输入",
+      "ready": "输入已准备，等待启动",
+      "starting": "正在启动工作流",
+      "running": "正在蒸馏",
+      "completed": "蒸馏已完成",
+      "completed_with_errors": "蒸馏已结束，部分处理失败",
+      "failed": "蒸馏失败",
+      "interrupted": "蒸馏已中断"
+    },
+    "phase": {
+      "scanning": "正在读取批次输入",
+      "converting": "正在准备工作流输入",
+      "starting": "正在启动工作流",
+      "processing": "正在处理输入"
+    }
+  },
+  "batch": {
+    "title": "批量检索",
+    "step_select": "1. 筛选核心实体",
+    "step_retrieve": "2. 批量检索",
+    "step_packages": "3. 资料包",
+    "min_neighbors": "至少关联",
+    "min_documents": "至少覆盖",
+    "find": "生成候选",
+    "finding": "正在筛选…",
+    "candidate_form": "筛选核心实体",
+    "candidates": "核心实体候选",
+    "entity": "实体",
+    "neighbors": "关联",
+    "documents": "文档",
+    "select_all": "全选候选",
+    "select_entity": "选择{{name}}",
+    "no_candidates": "暂无候选，试着降低筛选门槛。",
+    "selection": "已选 {{selected}} / {{total}} 个",
+    "chosen": "已选 {{count}} 个中心",
+    "reselect": "重新选择",
+    "configure": "批量设为中心并进入检索",
+    "graph_depth": "图谱深度",
+    "rag_top_k": "普通RAG候选块数",
+    "start": "开始批量检索",
+    "starting": "正在开始…",
+    "start_form": "开始批量检索",
+    "settings_summary": "图谱深度 {{graph_depth}} · 普通RAG候选 {{rag_top_k}} 块",
+    "restoring": "正在恢复批次进度…",
+    "progress": "已处理 {{processed}} / {{total}} 个实体",
+    "package_count": "已形成 {{count}} 个包",
+    "progress_label": "批量检索进度",
+    "current": "正在检索并形成包：{{name}} · {{percent}}%",
+    "stop": "停止",
+    "stopping": "正在停止…",
+    "wait_stop": "当前请求结束后停止，已完成结果会保留。",
+    "exceptions": "失败 {{failed}} 个 · 无可用原文 {{empty}} 个",
+    "item": {
+      "failed": "检索失败",
+      "empty": "暂无可用原文"
+    },
+    "submit": "批量进入蒸馏系统",
+    "submitted": "已进入蒸馏系统",
+    "distillation_pending": "蒸馏系统待接入",
+    "distillation_unknown": "蒸馏连接状态暂未就绪",
+    "status": {
+      "queued": "等待开始",
+      "running": "正在处理",
+      "completed": "本批次已完成",
+      "completed_with_errors": "本批次已结束，部分实体检索失败",
+      "cancelled": "已停止，已形成的包已保留",
+      "interrupted": "任务已中断，已形成的包已保留"
+    },
+    "errors": {
+      "candidates": "筛选失败，请检查服务连接后重试。",
+      "start": "未能开始，请检查服务和模型连接后重试。",
+      "connection": "暂时无法更新进度，正在重连…",
+      "conflict": "已有批次正在运行，请等待或返回原窗口查看。",
+      "missing": "上次批次不存在，可以重新开始。",
+      "submit": "蒸馏系统未确认接收，资料包已保留，可重试。",
+      "config": "无法读取蒸馏连接状态，请刷新重试。",
+      "model": "向量模型尚未连通，请接通服务或SSH隧道后重试。"
+    },
+    "deduplicated": "跨包已去重 {{count}} 块原文 · {{skipped}} 个中心内容全部重复已跳过",
+    "phase": {
+      "retrieving": "正在召回：{{done}} / {{total}} 个中心",
+      "packaging": "正在去重并保存资料包：{{done}} / {{total}} 个中心"
+    },
+    "saved_path": "保存位置："
+  },
+  "folderUpload": {
+    "choose": "选择文件夹",
+    "hint": "递归导入子文件夹中的 TXT、Markdown、PDF、Word。每个文件最多 20MB；不同目录下的同名文件会分别保存。",
+    "submit": "开始导入文件夹",
+    "stop": "停止后续上传",
+    "retry": "重试失败文件",
+    "ready": "待上传",
+    "skipped": "已跳过",
+    "sending": "上传中",
+    "submitted": "已提交",
+    "exists": "已存在",
+    "failed": "上传失败",
+    "unsupported": "不支持的文件类型",
+    "large": "文件超过 20MB",
+    "queue": "上传完成后，文档仍需等待解析与索引。",
+    "limited": "仅展示前 80 个文件，所有可用文件都会参与上传。"
   }
 }

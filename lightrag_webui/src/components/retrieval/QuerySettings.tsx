@@ -69,6 +69,7 @@ export default function QuerySettings() {
   // Default values for reset functionality
   const defaultValues = useMemo(() => ({
     mode: 'mix' as QueryMode,
+    graph_depth: 1,
     top_k: 40,
     chunk_top_k: 20,
     max_entity_tokens: 6000,
@@ -83,7 +84,9 @@ export default function QuerySettings() {
   // Mix offers the best retrieval coverage; Bypass intentionally skips retrieval.
   // Warn only for the narrower-coverage modes (hybrid/naive/local/global).
   const showQualityWarning =
-    querySettings.mode !== 'mix' && querySettings.mode !== 'bypass'
+    querySettings.mode !== 'mix' &&
+    querySettings.mode !== 'graph' &&
+    querySettings.mode !== 'bypass'
 
   return (
     <Card className="flex shrink-0 flex-col w-[280px]">
@@ -220,6 +223,7 @@ export default function QuerySettings() {
                   <SelectContent>
                     <SelectGroup>
                       <SelectItem value="mix">{t('retrievePanel.querySettings.queryModeOptions.mix')}</SelectItem>
+                      <SelectItem value="graph">{t('retrievePanel.querySettings.queryModeOptions.graph')}</SelectItem>
                       <SelectItem value="hybrid">{t('retrievePanel.querySettings.queryModeOptions.hybrid')}</SelectItem>
                       <SelectItem value="naive">{t('retrievePanel.querySettings.queryModeOptions.naive')}</SelectItem>
                       <SelectItem value="local">{t('retrievePanel.querySettings.queryModeOptions.local')}</SelectItem>
@@ -239,6 +243,49 @@ export default function QuerySettings() {
                 </p>
               )}
             </>
+
+            {querySettings.mode === 'graph' && (
+              <>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <label htmlFor="graph_depth" className="ml-1 cursor-help">
+                        {t('retrievePanel.querySettings.graphDepth')}
+                      </label>
+                    </TooltipTrigger>
+                    <TooltipContent side="left">
+                      <p>{t('retrievePanel.querySettings.graphDepthTooltip')}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <div className="flex items-center gap-1">
+                  <Input
+                    id="graph_depth"
+                    type="number"
+                    value={querySettings.graph_depth ?? 1}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      handleChange('graph_depth', value === '' ? '' : parseInt(value) || 0)
+                    }}
+                    onBlur={(e) => {
+                      const parsed = parseInt(e.target.value)
+                      handleChange(
+                        'graph_depth',
+                        Number.isNaN(parsed) ? 1 : Math.min(5, Math.max(0, parsed))
+                      )
+                    }}
+                    min={0}
+                    max={5}
+                    placeholder={t('retrievePanel.querySettings.graphDepthPlaceholder')}
+                    className="h-9 flex-1 pr-2 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [-moz-appearance:textfield]"
+                  />
+                  <ResetButton
+                    onClick={() => handleReset('graph_depth')}
+                    title="Reset to default"
+                  />
+                </div>
+              </>
+            )}
 
             {/* Top K */}
             <>

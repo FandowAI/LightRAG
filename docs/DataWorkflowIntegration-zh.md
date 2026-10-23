@@ -1,6 +1,6 @@
 # 检索结果转交与蒸馏任务接口
 
-本功能只增加后端接口。一个启动操作触发扫描目录、读取 JSON、转换输入、落盘和启动 `data-work-flow` 的完整流程。进度展示独立通过任务列表、详情和日志接口查询；当前不提供前端按钮或进度页面。
+本功能统一批量检索按钮与目录导入两种来源。批量检索完成后，按钮调用统一接口，后端读取该批次的 `packages.jsonl`、转换输入、落盘并启动 `data-work-flow`。独立蒸馏进度组件展示实际任务状态；已有检索进度继续维护。
 
 不修改检索流程、提示词或 `/query/data` 的响应，也不修改 `data-work-flow` 的 workflow。调用方应先完成原始结果的写入，再提交任务。
 
@@ -10,11 +10,11 @@
 
 | 字段 | 配置内容 |
 | --- | --- |
-| `input.paths` | 待读取的 JSON/JSONL 文件、目录或 glob；目录扫描为一层，按文件名排序，只取 `.json`、`.jsonl` |
-| `input.records_path` | 原始接口有额外包装时的字段路径；标准 `/query/data` 保持 `[]`，不要填 `[data]` |
+| `input.paths` | 仅目录提交使用；批次按钮不使用此字段，可保持 `[]`。支持 JSON/JSONL 文件、目录或 glob，目录只扫描一层 |
+| `input.records_path` | 仅目录提交使用；原始接口有额外包装时的字段路径。标准 `/query/data` 保持 `[]` |
 | `workflow_config` | 本次使用的 QA 配方；默认 `data_workflow_job.yaml` |
 | `project_directory` | `data-work-flow` 项目目录，默认 `/root/data-work-flow` |
-| `python` | 该项目的虚拟环境解释器，保留 `.venv-api/bin/python` 路径，不替换为符号链接的目标 |
+| `python` | 该项目的独立虚拟环境解释器；H200 当前使用 `.venv-qa/bin/python`，不替换为符号链接的目标 |
 | `credentials_file` | 凭据专用 `.env` 文件；默认 `null`，使用继承的进程凭据 |
 | `jobs_directory` | 本功能的任务资料目录，默认 `runs/data-workflow`；同一任务生命周期中不要改变此路径 |
 | `limits.max_active_jobs` | 每个 workspace 的最大活动任务数，默认 1；每个任务内部仍使用配方中的批次及并发限制 |
@@ -46,13 +46,46 @@ input:
 - `workflow.parameters`：问题数量、场景要求、分类要求、专家、量表及修订参数。
 - 各任务的 `prompt_file`：需要替换指令时指定 Markdown；相对路径以这份配方文件所在目录为基准。
 
-当前模型地址及名称为示例占位值，场景要求限定采购审批。这些值需要按实际材料填写；真实执行遇到示例模型会直接失败，不发送请求。
+当前配方的生成、分类和评价角色使用腾讯云 TokenHub 的 `deepseek-v4-flash-0731`，场景要求限定采购审批。部署时按实际模型权限及材料调整；示例占位模型仍会在执行前被拒绝。
 
 凭据按配方的变量名提供：`QA_API_KEY`、`CLASSIFIER_API_KEY`、`JUDGE_API_KEY`。不将密钥值写入任务配置或 API 返回体。沿用对方 CLI 的规则：已有进程环境变量优先于凭据文件。
 
 每次提交会生成独立的 `job.yaml`，自动替换输入、输出及正文路径映射，保留其他 workflow 参数。不会将原配方的输入文件误用成本次数据。各任务的 `prompt_file` 转为绝对路径，保留配方原来的资源基准。已有任务使用提交时的快照；修改配置后用新的 `request_id` 提交新任务。
 
-## 输入与转换
+## 批量检索按钮
+
+按钮直接调用 `POST /integrations/data-work-flow/submit`：
+
+```json
+{"source":{"type":"batch","batch_id":"检索批次ID"},"start":true}
+```
+
+服务使用当前 RAG workspace 的批次记录定位固定产物；客户端不能指定文件路径。
+仅接受 `completed` 或 `completed_with_errors` 且有已发布正文的批次。读取
+`manifest.json` 作为发布标记，将其快照写入蒸馏任务目录的 `batch-source.json`。
+后台 worker 在转换前校验清单身份、格式版本、文件 SHA-256 和行数；两个 JSONL
+文件的累计字节数受 `limits.max_input_bytes` 限制，正文记录数受 `max_records` 限制。
+校验失败阻止 workflow 启动，不修改检索文件。
+
+正文只来自 `packages.jsonl` 的 `entities`、`relationships` 和 `original_texts`。
+`sources.jsonl` 用于检查发布完整性，不展开为正文；共享引用不重新展开。
+不使用文件中已经渲染的 `text` 或 `metadata` 作为蒸馏正文。
+
+每个 workspace 的批次使用服务端保留的幂等标识 `batch:<batch_id>`，关联持久化在
+同一任务数据库中。并发点击创建一个任务；网络重试返回原任务。任务失败、中断或
+完成后再次点击仍返回原任务，不隐式重跑。准备为 `ready` 的任务可以明确启动。
+
+`GET /integrations/data-work-flow/jobs?source_batch_id=<id>&limit=1` 恢复关联任务；
+不依赖浏览器保存的蒸馏任务 ID。批量检索页面使用独立的 `BatchDistillation`
+组件，内部 hook 管理提交与轮询，`DataWorkflowProgress` 只接收任务对象并展示。
+切换或关闭页面终止本地请求，后台任务继续。日志使用后端字节游标按需加载。
+
+旧 `/batch-retrieval/config`、`/batch-retrieval/jobs/{id}/distill` 和 HTTP 转发已移除；
+`DISTILLATION_INGEST_URL`、`DISTILLATION_INGEST_API_KEY` 不再使用。
+`GET /integrations/data-work-flow/config` 返回 `ready` 和 `issues`，只检查本地路径、
+配方版本及模型占位配置，不会联网验证模型或保证第三方 Python 依赖可导入。
+
+## 目录输入与统一转换
 
 支持单份完整 `/query/data` JSON、此类对象组成的 JSON 数组，以及每行一份对象的 JSONL。重复匹配到的文件只读取一次。
 
@@ -72,7 +105,7 @@ input:
 
 输入写完后由 `.part` 发布为固定 `input.jsonl`，启动后不追加。对方现有入口缺少 `meta` 时可能记录警告，这是预期行为。
 
-## 启动按钮的接口
+## 目录提交接口
 
 所有路径沿用 LightRAG 的 API 前缀和认证。不会因为白名单而绕过已有认证；客户端不能通过请求选择程序、输入路径或凭据文件。
 
@@ -91,7 +124,7 @@ Content-Type: application/json
 
 | 接口 | 用途 |
 | --- | --- |
-| `GET /integrations/data-work-flow/config` | 查看当前路径和限额，不返回密钥值 |
+| `GET /integrations/data-work-flow/config` | 查看本地配置检查结果、路径和限额，不返回密钥值 |
 | `GET /integrations/data-work-flow/jobs?limit=20&offset=0` | 分页任务列表；新进入进度页面时恢复任务 |
 | `GET /integrations/data-work-flow/jobs/{job_id}` | 查询一个任务 |
 | `GET /integrations/data-work-flow/jobs/{job_id}/logs?stream=stderr&offset=0&limit=8192` | 按字节游标读取日志；`stream` 可选 `stdout`、`stderr` |
@@ -103,6 +136,7 @@ Content-Type: application/json
   "schema_version": 1,
   "job_id": "distill-…",
   "request_id": "click-…",
+  "source": {"type":"directory","batch_id":null},
   "status": "running",
   "phase": "processing",
   "created_at": "2026-10-22T00:00:00+00:00",
@@ -155,7 +189,8 @@ Content-Type: application/json
 ## 代码边界
 
 - `lightrag/integrations/data_workflow/config.py`：配置与配方快照。
-- `inputs.py`：读取输入文件。
+- `inputs.py`：读取目录模式的接口结果文件。
+- `batch_source.py`：定位批次、校验发布产物并规范字段。
 - `conversion.py`：纯字段投影。
 - `storage.py`：任务持久化、幂等与状态认领。
 - `service.py`：启动操作编排。
@@ -164,13 +199,23 @@ Content-Type: application/json
 - `progress.py`、`contracts.py`：可观测进度和公开返回结构。
 - `lightrag/api/routers/data_workflow_routes.py`：API 参数、认证及 HTTP 错误映射。
 
-核心检索、现有 workflow 与前端保持独立；服务器仅注册新增路由。
+核心检索和对方 workflow 保持独立。前端 API 位于 `src/api/dataWorkflow.ts`，进度组件及轮询逻辑位于 `src/features/distillation/`。
 
-## 本次验证与待配置项
+## 验证与待配置项
 
-- 新增集成与路由测试 47 项通过；连同项目文档字符串规范检查共 63 项通过，Ruff 检查通过。
-- 使用真实 `/root/data-work-flow` 的 `source_review` CLI 做无模型验证：扫描 4 份响应，隔离 1 份失败记录，导入 3 条正文并完成 3 个已提交批次，进度为 100%，实际运行回执正常。
-- 扩大 API 回归时，669 项通过、4 项跳过，停止于 3 项既有测试夹具错误；在修改前的服务器源码中复现同样 3 项失败，涉及 PromptAdmin 的 MagicMock 序列化及登录测试 FakeLightRAG 缺少向量存储属性。
-- 尚未执行真实模型蒸馏：原始输入路径、模型及模板参数、凭据待配置。正式执行还要求 `python` 指向能正常加载 QA workflow 的环境。当前默认 `.venv-api` 在 QA 预检查时报告 `dataflow.get_logger` 导入失败，需要修复该目标环境或配置可用解释器；此问题不影响已经验证的无模型文件流转。
+相关测试覆盖目录与批次输入、原文保留、跨 workspace 隔离、发布产物校验、并发
+幂等、任务恢复、实际 CLI 回执、按钮调用、独立轮询及日志游标。测试使用本地
+模拟 CLI，不调用真实模型。
 
-验证期间未更改对方项目代码或安装依赖，也未重启当前 LightRAG 服务。
+H200 在 2026-10-23 已按目标项目的 `uv.lock` 安装独立 `.venv-qa`，旧 `.venv-api`
+保持原状。旧环境同时安装的 `dataflow` 与 `open-dataflow` 存在导入目录冲突；新环境
+使用项目锁定的 `open-dataflow==1.0.10`，QA 模块导入和依赖检查通过。
+凭据仅保存在仓库外的受限文件中，新部署仍需自行提供凭据，不能使用 OpenCode
+的 ChatGPT 账号授权代替模型 API Key。
+
+同日使用隔离 workspace 和两份合成采购制度完成真实后端验收：上传入库、普通
+问答、批量检索及发布、输入准备、分类 QA、双专家评价、任务恢复、幂等提交和
+日志游标均通过。QA 阶段产生 1 条通过评价的问答，发生 5 次实际模型请求，无
+失败或重试；首版通过，因此没有强制触发条件修订。测试未修改正式知识库，
+也不代表所有文件格式、浏览器操作或全量回归均已通过。详见
+[生产接入验证记录](design/ProductionIntegrationValidation.md)。

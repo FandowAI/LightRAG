@@ -23,6 +23,8 @@ from lightrag.operate import (
     collect_kg_merge_candidates,
 )
 from lightrag.utils import compute_mdhash_id, logger
+from lightrag.enterprise_identity import enabled as enterprise_enabled
+from lightrag.enterprise_merge import EnterpriseResolver
 
 
 @dataclass(frozen=True)
@@ -62,6 +64,8 @@ class EntityMergeManager:
                 "margin_threshold REAL NOT NULL, top_k INTEGER NOT NULL)"
             )
 
+        self.enterprise = EnterpriseResolver(self) if enterprise_enabled() else None
+
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=10)
         db.row_factory = sqlite3.Row
@@ -85,6 +89,11 @@ class EntityMergeManager:
             else EntityMergeSettings()
         )
         return {
+            "identity_verification": {
+                "enabled": bool(getattr(self, "enterprise", None)),
+                "uncertain_policy": "keep_separate",
+                "registry": self.enterprise.registry.public_snapshot() if getattr(self, "enterprise", None) else None,
+            },
             "workspace": self.workspace,
             "revision": row["revision"] if row else 0,
             "settings": asdict(settings),
@@ -185,6 +194,10 @@ class EntityMergeManager:
         if not name.strip() or not self._type(entity_type):
             raise ValueError("A non-empty name and valid entity type are required")
         existing = await self.rag.chunk_entity_relation_graph.get_node(name)
+        if getattr(self, "enterprise", None):
+            candidates = await self.candidates(name, entity_type, settings)
+            return {"existing_exact_name": bool(existing), "candidates": candidates,
+                    "decision": "candidate", "target": None}
         candidates = (
             [] if existing else await self.candidates(name, entity_type, settings)
         )
@@ -213,6 +226,8 @@ class EntityMergeManager:
     async def resolve(self, chunk_results: list) -> tuple[list, list[dict[str, Any]]]:
         """Resolve only against the committed name index, never this batch."""
         settings = EntityMergeSettings(**self.snapshot()["settings"])
+        if getattr(self, "enterprise", None):
+            return await self.enterprise.resolve(chunk_results, settings)
         if not settings.enabled:
             return chunk_results, []
         types: dict[str, set[str | None]] = defaultdict(set)
@@ -298,10 +313,12 @@ class EntityMergeManager:
         if records:
             await self.name_vdb.upsert(records)
             await self.name_vdb.index_done_callback()
+        if getattr(self, "enterprise", None):
+            await self.enterprise.sync_aliases(names)
 
     async def merge(
         self, chunk_results: list, *, already_resolved: bool = False, **kwargs: Any
-    ) -> dict[str, int]:
+    ) -> dict[str, Any]:
         async with self.lock():
             return await self.merge_unlocked(
                 chunk_results, already_resolved=already_resolved, **kwargs
@@ -309,7 +326,7 @@ class EntityMergeManager:
 
     async def merge_unlocked(
         self, chunk_results: list, *, already_resolved: bool = False, **kwargs: Any
-    ) -> dict[str, int]:
+    ) -> dict[str, Any]:
         """Caller must hold ``lock()`` through its write-ahead journal."""
         from lightrag.operate import merge_nodes_and_edges
 
@@ -317,9 +334,16 @@ class EntityMergeManager:
         decisions: list[dict[str, Any]] = []
         if not already_resolved:
             resolved, decisions = await self.resolve(chunk_results)
+        status, status_lock = kwargs.get("pipeline_status"), kwargs.get("pipeline_status_lock")
+        if status is not None and status_lock is not None:
+            async with status_lock:
+                if status.get("cancellation_requested"):
+                    from lightrag.exceptions import PipelineCancelledException
+
+                    raise PipelineCancelledException("Cancelled before identity results reached the graph")
         await merge_nodes_and_edges(chunk_results=resolved, **kwargs)
         await self.sync_candidates(resolved)
-        return {
+        stats = {
             reason: sum(item["reason"] == reason for item in decisions)
             for reason in (
                 "merged",
@@ -331,8 +355,18 @@ class EntityMergeManager:
             )
         }
 
+        if getattr(self, "enterprise", None):
+            stats.update({
+                reason: sum(item["reason"] == reason for item in decisions)
+                for reason in ("verified_registry", "identity_verified", "separate_scope", "separate_uncertain", "new")
+            })
+            stats.update(identity_decisions=decisions, registry=self.enterprise.registry.public_snapshot())
+        return stats
+
     async def delete_names(self, names: set[str] | list[str]) -> None:
         if names:
+            if getattr(self, "enterprise", None):
+                self.enterprise.delete_aliases(names)
             await self.name_vdb.delete(
                 [compute_mdhash_id(name, prefix="ent-name-") for name in names]
             )

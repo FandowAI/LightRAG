@@ -63,7 +63,14 @@ class JobStore:
                 "SELECT record FROM jobs WHERE request_id=?", (record["request_id"],)
             ).fetchone()
             if previous:
-                return json.loads(previous[0]), False
+                existing = json.loads(previous[0])
+                if existing.get("source", {"type": "directory"}) != record.get(
+                    "source", {"type": "directory"}
+                ):
+                    raise JobConflict(
+                        "Request ID is already associated with another source"
+                    )
+                return existing, False
             active = conn.execute(
                 "SELECT COUNT(*) FROM jobs WHERE status IN (?,?,?)", ACTIVE
             ).fetchone()[0]
@@ -80,6 +87,13 @@ class JobStore:
             )
             return record, True
 
+    def by_request(self, request_id: str) -> dict | None:
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT record FROM jobs WHERE request_id=?", (request_id,)
+            ).fetchone()
+            return json.loads(row[0]) if row else None
+
     def get(self, job_id: str) -> dict:
         with self.connection() as conn:
             row = conn.execute(
@@ -89,12 +103,24 @@ class JobStore:
                 raise KeyError(job_id)
             return json.loads(row[0])
 
-    def list(self, limit: int = 20, offset: int = 0) -> tuple[list[dict], int]:
+    def list(
+        self, limit: int = 20, offset: int = 0, source_batch_id: str | None = None
+    ) -> tuple[list[dict], int]:
+        where = (
+            " WHERE json_extract(record, '$.source.type')='batch' AND json_extract(record, '$.source.batch_id')=?"
+            if source_batch_id
+            else ""
+        )
+        params = (source_batch_id,) if source_batch_id else ()
         with self.connection() as conn:
-            count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+            count = conn.execute(
+                "SELECT COUNT(*) FROM jobs" + where, params
+            ).fetchone()[0]
             rows = conn.execute(
-                "SELECT record FROM jobs ORDER BY rowid DESC LIMIT ? OFFSET ?",
-                (limit, offset),
+                "SELECT record FROM jobs"
+                + where
+                + " ORDER BY rowid DESC LIMIT ? OFFSET ?",
+                (*params, limit, offset),
             ).fetchall()
             return [json.loads(row[0]) for row in rows], count
 

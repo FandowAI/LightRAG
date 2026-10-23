@@ -278,13 +278,14 @@ Within your acceptable latency and cost budget, prefer the highest-scoring model
 
 ### Selecting Query Modes
 
-LightRAG supports five query modes:
+LightRAG supports six query modes:
 
 - **local**: Focuses on precise matching of local contexts and specific entities. It retrieves candidate entities and their directly associated attributes from the knowledge graph. This mode is suitable for Q&A targeting specific objects, concrete concepts, or detailed facts, providing highly relevant and detailed local context support.
 - **global**: Focuses on macro themes, cross-document reasoning, and deep relationships between entities. It retrieves relationship chains covering broad themes and concepts. This mode is suitable for queries that require summarization across multiple contexts, trend analysis, or understanding complex semantic dependencies.
 - **hybrid**: Merges the retrieval results of both local and global modes. It performs comprehensive reasoning and generation by simultaneously recalling specific entities and global relationship contexts.
 - **naive**: Traditional RAG retrieval based on text chunks. It does not use a knowledge graph and relies directly on vector similarity to retrieve from the original text chunks.
 - **mix**: Fully-featured mode that merges retrieval results from local, global, and naive modes to provide the most comprehensive and rich retrieval results.
+- **graph**: Starts from an exact entity identifier and deterministically traverses its knowledge-graph neighborhood. This mode does not use keyword extraction, vector retrieval, or reranking.
 
 The default query mode for LightRAG is `mix`. Using `mix` mode generally yields the most ideal query results. The `mix` mode takes slightly longer than `naive`, while other query modes are roughly comparable in latency.
 

@@ -25,6 +25,7 @@ export default function EntityMergeSettingsDialog() {
   const [name, setName] = useState('')
   const [entityType, setEntityType] = useState('')
   const [preview, setPreview] = useState<EntityMergePreview | null>(null)
+  const identityChecks = snapshot?.identity_verification?.enabled === true
 
   useEffect(() => {
     if (!open) return
@@ -111,27 +112,33 @@ export default function EntityMergeSettingsDialog() {
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{t('entityMerge.title', '实体语义合并')}</DialogTitle>
-          <DialogDescription>{t('entityMerge.description', '只在图谱写入时比较实体名称向量。保存后对后续文档生效。')}</DialogDescription>
+          <DialogDescription>{identityChecks
+            ? t('entityMerge.identityDescription', '先查已确认词表，再由模型核对身份和原文证据。不确定时分开保留。')
+            : t('entityMerge.description', '只在图谱写入时比较实体名称向量。保存后对后续文档生效。')}</DialogDescription>
         </DialogHeader>
         {loading && <p className="text-sm">{t('entityMerge.loading', '正在读取设置…')}</p>}
         {snapshot && settings && <div className="space-y-4">
           <div className="rounded border p-3 text-sm space-y-1">
             <div>{t('entityMerge.workspace', '工作区')}：{snapshot.workspace}</div>
             <div>{t('entityMerge.model', '向量模型')}：{snapshot.embedding_model || '—'} · {snapshot.embedding_dim}D</div>
-            <div>{t('entityMerge.rules', '固定规则')}：{t('entityMerge.fixedRules', '仅比较已入库实体；实体类型必须一致；只使用名称向量')}</div>
+            <div>{t('entityMerge.rules', '固定规则')}：{identityChecks
+              ? t('entityMerge.identityRules', '相似度仅用于寻找候选；归属冲突不合并；合并必须有已确认词表或原文证据')
+              : t('entityMerge.fixedRules', '仅比较已入库实体；实体类型必须一致；只使用名称向量')}</div>
           </div>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={settings.enabled}
               onChange={event => setSettings({ ...settings, enabled: event.target.checked })} />
-            {t('entityMerge.enabled', '启用实体语义合并')}
+            {identityChecks ? t('entityMerge.identityEnabled', '启用模型身份核对（已确认词表始终生效）') : t('entityMerge.enabled', '启用实体语义合并')}
           </label>
           <div className="space-y-3 rounded border p-3">
             {numberField(t('entityMerge.similarity', '名称余弦相似度下限'), 'similarity_threshold', 0, 1, 0.01)}
-            {numberField(t('entityMerge.margin', '第一、第二候选分差下限'), 'margin_threshold', 0, 1, 0.01)}
+            {!identityChecks && numberField(t('entityMerge.margin', '第一、第二候选分差下限'), 'margin_threshold', 0, 1, 0.01)}
             {numberField(t('entityMerge.topK', '候选数量 Top K'), 'top_k', 1, 100, 1)}
           </div>
           <p className="text-muted-foreground text-xs">
-            {t('entityMerge.hint', '默认 0.90 / 0.05 / 20 是试运行值；首批文档没有已入库候选。修改不会追溯已写入图谱。')}
+            {identityChecks
+              ? t('entityMerge.identityHint', '候选分数不是身份确认结果。设置仅对后续写入生效，不自动修改历史图谱。')
+              : t('entityMerge.hint', '默认 0.90 / 0.05 / 20 是试运行值；首批文档没有已入库候选。修改不会追溯已写入图谱。')}
           </p>
           <div className="flex justify-end">
             <Button disabled={!valid || !snapshot.write_enabled || saving} onClick={save}>
@@ -150,11 +157,13 @@ export default function EntityMergeSettingsDialog() {
               </Button>
             </div>
             {preview && <div className="max-h-48 overflow-y-auto rounded border p-2 text-sm">
-              <p>{t('entityMerge.decision', '判定')}：{preview.decision === 'merge'
-                ? `${t('entityMerge.merge', '合并到')} ${preview.target}`
-                : preview.decision === 'exact_name'
-                  ? t('entityMerge.exactName', '已有完全同名实体')
-                  : t('entityMerge.create', '创建新实体')}</p>
+              <p>{t('entityMerge.decision', '判定')}：{preview.decision === 'candidate'
+                ? t('entityMerge.identityPreview', '仅展示名称候选；实际写入时自动核对身份和原文证据')
+                : preview.decision === 'merge'
+                  ? `${t('entityMerge.merge', '合并到')} ${preview.target}`
+                  : preview.decision === 'exact_name'
+                    ? t('entityMerge.exactName', '已有完全同名实体')
+                    : t('entityMerge.create', '创建新实体')}</p>
               {preview.candidates.map(candidate => <div key={candidate.name} className="flex justify-between gap-2 border-t py-1">
                 <span>{candidate.name} · {candidate.type}</span><span>{candidate.score.toFixed(4)}</span>
               </div>)}

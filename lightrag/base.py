@@ -90,13 +90,17 @@ T = TypeVar("T")
 class QueryParam:
     """Configuration parameters for query execution in LightRAG."""
 
-    mode: Literal["local", "global", "hybrid", "naive", "mix", "bypass"] = "mix"
+    mode: Literal["local", "global", "hybrid", "naive", "mix", "graph", "bypass"] = (
+        "mix"
+    )
     """Specifies the retrieval mode:
     - "local": Focuses on context-dependent information.
     - "global": Utilizes global knowledge.
     - "hybrid": Combines local and global retrieval methods.
     - "naive": Performs a basic search without advanced techniques.
     - "mix": Integrates knowledge graph and vector retrieval.
+    - "graph": Traverses from an exact entity identifier without vector retrieval.
+    - "bypass": Calls the answering model without retrieval.
     """
 
     only_need_context: bool = False
@@ -187,6 +191,9 @@ class QueryParam:
     including when ``user_prompt`` is empty, where the prefix alone becomes the
     instructions. Set this to True to take full control of the final text.
     """
+
+    graph_depth: int = 1
+    """Maximum hop depth for ``graph`` mode, where 0 returns only the root entity."""
 
 
 @dataclass
@@ -1317,6 +1324,7 @@ class BaseGraphStorage(StorageNameSpace, ABC):
 class DocStatus(str, Enum):
     """Document processing status.
     Pipeline order: PENDING -> PARSING -> ANALYZING (optional) -> PROCESSING -> PROCESSED | FAILED.
+    Duplicate documents finish as SKIPPED without graph writes or automatic retry.
     PREPROCESSED is deprecated, kept for backward compatibility.
     """
 
@@ -1326,6 +1334,7 @@ class DocStatus(str, Enum):
     PROCESSING = "processing"  # Phase 3: entity/relation extraction
     PREPROCESSED = "preprocessed"  # Deprecated: use ANALYZING in new pipeline
     PROCESSED = "processed"
+    SKIPPED = "skipped"  # Terminal duplicate: no independent graph contribution.
     FAILED = "failed"
 
 

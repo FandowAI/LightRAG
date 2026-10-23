@@ -1,0 +1,24 @@
+[Unit]
+Description=FanDo enterprise LightRAG
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lightrag
+Group=lightrag
+WorkingDirectory=/opt/fando/lightrag
+EnvironmentFile=/etc/fando-lightrag.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/fando/lightrag/.venv/bin/lightrag-server
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=180
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -14,12 +14,17 @@ export type EntityMergeSnapshot = {
   embedding_model: string | null
   embedding_dim: number
   write_enabled: boolean
+  identity_verification?: {
+    enabled: boolean
+    uncertain_policy: 'keep_separate'
+    registry: { version: string | null; sha256: string; entries: number } | null
+  }
 }
 
 export type EntityMergePreview = {
   existing_exact_name: boolean
   candidates: { name: string; type: string; score: number }[]
-  decision: 'exact_name' | 'merge' | 'create'
+  decision: 'exact_name' | 'merge' | 'create' | 'candidate'
   target: string | null
 }
 

@@ -42,6 +42,7 @@ async def client(monkeypatch):
         )
 
     service.submit.return_value = job("preparing")
+    service.submit_batch.return_value = job("preparing")
     service.get.return_value = job("running")
     service.start.return_value = job("starting")
     service.list.return_value = {
@@ -182,3 +183,42 @@ async def test_router_does_not_read_config_or_start_processes_at_registration(
     app.include_router(routes.create_data_workflow_routes(service, None))
     spec = app.openapi()
     assert "/integrations/data-work-flow/submit" in spec["paths"]
+
+
+async def test_batch_button_uses_canonical_service_without_directory_input(client):
+    http, service = client
+    response = await http.post(
+        "/integrations/data-work-flow/submit",
+        json={
+            "source": {"type": "batch", "batch_id": "batch-1"},
+            "start": True,
+        },
+    )
+    assert response.status_code == 202
+    service.submit_batch.assert_called_once_with("batch-1", True)
+    service.submit.assert_not_called()
+
+
+async def test_batch_association_can_be_restored_from_backend(client):
+    http, service = client
+    response = await http.get(
+        "/integrations/data-work-flow/jobs?source_batch_id=batch-1&limit=1"
+    )
+    assert response.status_code == 200
+    service.list.assert_called_once_with(1, 0, "batch-1")
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        {"type": "batch", "batch_id": "../another"},
+        {"type": "batch", "batch_id": "a", "path": "/etc/passwd"},
+        {"type": "unknown", "batch_id": "a"},
+    ],
+)
+async def test_batch_source_has_no_arbitrary_path_override(client, source):
+    http, service = client
+    assert (
+        await http.post("/integrations/data-work-flow/submit", json={"source": source})
+    ).status_code == 422
+    service.submit_batch.assert_not_called()

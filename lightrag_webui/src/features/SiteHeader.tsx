@@ -38,13 +38,16 @@ function TabsNavigation() {
   const { t } = useTranslation()
 
   return (
-    <div className="flex h-8 self-center">
-      <TabsList className="h-full gap-2">
+    <div className="flex h-8 min-w-0 max-w-full self-center overflow-x-auto">
+      <TabsList className="h-full shrink-0 gap-2">
         <NavigationTab value="documents" currentTab={currentTab}>
           {t('header.documents')}
         </NavigationTab>
         <NavigationTab value="knowledge-graph" currentTab={currentTab}>
           {t('header.knowledgeGraph')}
+        </NavigationTab>
+        <NavigationTab value="entity-centers" currentTab={currentTab}>
+          {t('batch.title')}
         </NavigationTab>
         <NavigationTab value="retrieval" currentTab={currentTab}>
           {t('header.retrieval')}
@@ -83,7 +86,7 @@ export default function SiteHeader() {
   }
 
   return (
-    <header className="border-border/40 bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 flex h-10 w-full border-b px-4 backdrop-blur">
+    <header className="border-border/40 bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 flex min-h-10 w-full flex-wrap border-b px-4 backdrop-blur md:h-10 md:flex-nowrap">
       <div className="min-w-[200px] w-auto flex items-center">
         {/* Document-relative brand link: under HashRouter the pathname always
             names this entry, so this resolves back to THIS entry — never a
@@ -113,7 +116,7 @@ export default function SiteHeader() {
         <TouchDescriptionPopover description={webuiDescription} />
       </div>
 
-      <div className="flex h-10 flex-1 items-center justify-center">
+      <div className="order-3 flex h-10 w-full min-w-0 items-center justify-center md:order-none md:w-auto md:flex-1">
         <TabsNavigation />
         {isGuestMode && (
           <div className="ml-2 self-center px-2 py-1 text-xs bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 rounded-md">
@@ -122,7 +125,7 @@ export default function SiteHeader() {
         )}
       </div>
 
-      <nav className="w-[200px] flex items-center justify-end">
+      <nav className="ml-auto flex w-auto items-center justify-end md:ml-0 md:w-[200px]">
         <div className="flex items-center gap-2">
           {versionDisplay && (
             <TooltipProvider>

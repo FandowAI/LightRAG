@@ -18,6 +18,14 @@ from lightrag.integrations.data_workflow.service import DataWorkflowService
 from lightrag.integrations.data_workflow.storage import JobConflict
 
 
+class BatchSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["batch"]
+    batch_id: str = Field(
+        min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$"
+    )
+
+
 class SubmitRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -28,6 +36,7 @@ class SubmitRequest(BaseModel):
         pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
         description="Reuse this ID when retrying a button click; a new ID creates a new job.",
     )
+    source: BatchSource | None = None
     start: StrictBool = Field(
         default=True,
         description="Scan, convert and start the workflow. False only prepares fixed input files.",
@@ -73,17 +82,23 @@ def create_data_workflow_routes(
         dependencies=[Depends(auth)],
     )
     def submit(body: SubmitRequest, request: Request):
-        return links(
-            invoke(lambda: service.submit(body.request_id, body.start)), request
+        action = (
+            (lambda: service.submit_batch(body.source.batch_id, body.start))
+            if body.source
+            else (lambda: service.submit(body.request_id, body.start))
         )
+        return links(invoke(action), request)
 
     @router.get("/jobs", response_model=JobListResponse, dependencies=[Depends(auth)])
     def jobs(
         request: Request,
         limit: int = Query(20, ge=1, le=100),
         offset: int = Query(0, ge=0),
+        source_batch_id: str | None = Query(
+            None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$"
+        ),
     ):
-        result = invoke(lambda: service.list(limit, offset))
+        result = invoke(lambda: service.list(limit, offset, source_batch_id))
         result["items"] = [links(job, request) for job in result["items"]]
         return result
 

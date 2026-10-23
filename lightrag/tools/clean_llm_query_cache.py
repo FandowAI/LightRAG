@@ -62,7 +62,7 @@ WORKSPACE_ENV_MAP = {
 # Query cache modes. Must cover every QueryParam.mode that reaches the LLM cache,
 # i.e. all of them except "bypass", which answers straight from the LLM and writes
 # no cache entry. Entries for a mode missing here are neither counted nor deleted.
-QUERY_MODES = ["mix", "hybrid", "local", "global", "naive"]
+QUERY_MODES = ["mix", "hybrid", "local", "global", "naive", "graph"]
 
 # Query cache types
 CACHE_TYPES = ["query", "keywords"]

@@ -10,8 +10,18 @@ import sys
 import threading
 import uuid
 from pathlib import Path
+from collections.abc import Callable
 
-from .config import PROJECT_ROOT, configuration_path, load_settings, write_job_config
+from .batch_source import BatchSnapshot
+
+from .config import (
+    PROJECT_ROOT,
+    configuration_path,
+    load_settings,
+    write_job_config,
+    read_yaml,
+)
+from .execution import validate_execution
 from .progress import process_identity, public_job, reconcile
 from .storage import ACTIVE, TERMINAL, JobConflict, JobStore, timestamp
 
@@ -19,9 +29,16 @@ from .storage import ACTIVE, TERMINAL, JobConflict, JobStore, timestamp
 class DataWorkflowService:
     """Keep API requests short while a detached worker owns each complete run."""
 
-    def __init__(self, workspace: str, config_path: Path | None = None):
+    def __init__(
+        self,
+        workspace: str,
+        config_path: Path | None = None,
+        *,
+        batch_lookup: Callable[[str], BatchSnapshot] | None = None,
+    ):
         self.workspace = workspace
         self.config_path = config_path
+        self.batch_lookup = batch_lookup
 
     def _resources(self):
         config = self.config_path or configuration_path()
@@ -32,7 +49,14 @@ class DataWorkflowService:
 
     def configuration(self) -> dict:
         settings, _, _ = self._resources()
+        issues = []
+        try:
+            validate_execution(settings, read_yaml(settings.workflow_config))
+        except (ValueError, OSError) as exc:
+            issues.append(str(exc))
         return {
+            "ready": not issues,
+            "issues": issues,
             "config_file": str(self.config_path or configuration_path()),
             "workflow_config": str(settings.workflow_config),
             "input": settings.input.model_dump(),
@@ -43,7 +67,35 @@ class DataWorkflowService:
             "limits": settings.limits.model_dump(),
         }
 
+    def submit_batch(self, batch_id: str, start: bool = True) -> dict:
+        if self.batch_lookup is None:
+            raise ValueError("Batch source lookup is unavailable")
+        _, store, _ = self._resources()
+        request_id = "batch:" + batch_id
+        existing = store.by_request(request_id)
+        if existing is not None:
+            if existing.get("source", {}).get("batch_id") != batch_id:
+                raise JobConflict("Request ID belongs to another source")
+            return self._existing(store, existing, start)
+        snapshot = self.batch_lookup(batch_id)
+        if snapshot.workspace != self.workspace or snapshot.batch_id != batch_id:
+            raise ValueError("Batch source belongs to another workspace")
+        return self._submit(request_id, start, snapshot)
+
+    def _existing(self, store: JobStore, record: dict, start: bool) -> dict:
+        record = reconcile(store, record)
+        if start and record["status"] == "ready":
+            return self.start(record["job_id"])
+        return public_job(record)
+
     def submit(self, request_id: str, start: bool = True) -> dict:
+        if request_id.startswith("batch:"):
+            raise ValueError("Batch request IDs are reserved")
+        return self._submit(request_id, start)
+
+    def _submit(
+        self, request_id: str, start: bool, snapshot: BatchSnapshot | None = None
+    ) -> dict:
         settings, store, root = self._resources()
         # Dead workers must not permanently consume the per-workspace run capacity.
         for record in store.active():
@@ -54,6 +106,9 @@ class DataWorkflowService:
             {
                 "job_id": job_id,
                 "request_id": request_id,
+                "source": {"type": "batch", "batch_id": snapshot.batch_id}
+                if snapshot
+                else {"type": "directory"},
                 "status": "preparing",
                 "phase": "scanning",
                 "created_at": now,
@@ -68,10 +123,7 @@ class DataWorkflowService:
             settings.limits.max_active_jobs,
         )
         if not created:
-            record = reconcile(store, record)
-            if start and record["status"] == "ready":
-                return self.start(record["job_id"])
-            return public_job(record)
+            return self._existing(store, record, start)
         try:
             directory = Path(record["directory"])
             directory.mkdir(parents=True, exist_ok=False)
@@ -79,6 +131,10 @@ class DataWorkflowService:
             (directory / "settings.json").write_text(
                 settings.model_dump_json(indent=2), encoding="utf-8"
             )
+            if snapshot is not None:
+                (directory / "batch-source.json").write_text(
+                    snapshot.model_dump_json(indent=2), encoding="utf-8"
+                )
             write_job_config(settings.workflow_config, directory)
             self._spawn(store, record, "prepare-run" if start else "prepare")
         except Exception as exc:
@@ -157,9 +213,9 @@ class DataWorkflowService:
         _, store, _ = self._resources()
         return public_job(reconcile(store, store.get(job_id)))
 
-    def list(self, limit: int, offset: int) -> dict:
+    def list(self, limit: int, offset: int, source_batch_id: str | None = None) -> dict:
         _, store, _ = self._resources()
-        records, total = store.list(limit, offset)
+        records, total = store.list(limit, offset, source_batch_id)
         return {
             "items": [public_job(reconcile(store, record)) for record in records],
             "total": total,

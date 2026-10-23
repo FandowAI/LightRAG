@@ -32,6 +32,13 @@ site/
 /analysis/
 # Local delivery jobs, retrieved evidence, generated QA and job snapshots
 /runs/data-workflow/
+# Local analysis outputs and execution records (never publish).
+analyze/
+analysis-output/
+execution-records/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
 *.log
 *.log.*
 *.logfire
@@ -103,3 +110,9 @@ memory-bank
 
 # native_parser/docx CLI output (audit JSONL + image dir)
 /parse_output/
+
+# Versioned enterprise policy; keep all other user prompts and private rosters local.
+!prompts/entity_type/
+prompts/entity_type/*
+!prompts/entity_type/fando_enterprise.yml
+/config/*.private.json

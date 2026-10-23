@@ -2,7 +2,13 @@
 
 This optional overlay is active for the server's Neo4j + Milvus configuration. It does not change the ordinary entity vector collection or query behavior. Settings are stored per workspace in `entity_merge_settings.sqlite3` under `WORKING_DIR`; the separate Milvus collection is `<workspace>_name_entities_<embedding-model>_<dimension>d`.
 
-## Decision
+When `ENTERPRISE_KNOWLEDGE_ENABLED=true`, the evidence-based enterprise overlay
+replaces the score-based decision below. See
+[EnterpriseKnowledgeMigration.md](EnterpriseKnowledgeMigration.md) for verified
+glossary rules, original-source checks, uncertainty retention, and alias lifecycle.
+The locking, journal, and name-index publication contracts still apply.
+
+## Legacy decision (enterprise overlay disabled)
 
 For each extracted entity name, look only at the committed name collection from earlier merge operations. Names extracted in the same batch are not inserted into that collection until the batch graph merge has completed. The name vector is generated from the name alone; the existing `entities` collection still embeds the name plus description. Only candidates with the same normalized entity type enter the top-K ranking. The best candidate is selected when cosine score is at least `similarity_threshold` and the difference to the second same-type candidate is at least `margin_threshold`. A single candidate needs no margin. Exact names continue through the existing graph identity path. Missing or conflicting extracted types bypass semantic resolution.
 

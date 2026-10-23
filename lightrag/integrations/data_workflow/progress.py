@@ -90,6 +90,7 @@ def public_job(record: dict) -> dict:
                 "error",
             )
         },
+        "source": record.get("source", {"type": "directory"}),
         "terminal": status in TERMINAL,
         "can_start": status == "ready",
         "poll_after_ms": 2000 if status in ACTIVE else 0,

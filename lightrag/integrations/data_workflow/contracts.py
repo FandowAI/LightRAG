@@ -53,10 +53,16 @@ class Artifacts(Contract):
     stderr: str
 
 
+class Source(Contract):
+    type: Literal["directory", "batch"]
+    batch_id: str | None = None
+
+
 class JobResponse(Contract):
     schema_version: Literal[1]
     job_id: str
     request_id: str
+    source: Source
     status: JobStatus
     phase: str
     created_at: str

@@ -35,6 +35,12 @@ afterEach(() => {
 })
 
 describe('admin header deployment identity', () => {
+  test('batch retrieval is a top-level tab before the test retrieval page', () => {
+    renderHeader()
+    const names = screen.getAllByRole('tab').map(tab => tab.textContent)
+    expect(names).toEqual(['Documents', 'Knowledge Graph', 'Batch retrieval', 'Retrieval', 'Prompts'])
+  })
+
   test('a keyboard user reaches the brand link first and it describes the deployment', async () => {
     const user = userEvent.setup()
     setDeployment('Acme KB', DESCRIPTION)

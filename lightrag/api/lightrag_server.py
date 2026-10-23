@@ -73,6 +73,7 @@ from lightrag.parser.external.mineru.cache import MinerUParserOptions
 from lightrag.api.routers.query_routes import create_query_routes
 from lightrag.api.routers.data_workflow_routes import create_data_workflow_routes
 from lightrag.integrations.data_workflow.service import DataWorkflowService
+from lightrag.integrations.data_workflow.batch_source import resolve_batch
 from lightrag.api.routers.prompt_admin_routes import create_prompt_admin_routes
 from lightrag.api.routers.entity_merge_routes import create_entity_merge_routes
 from lightrag.entity_merge import EntityMergeManager
@@ -2593,7 +2594,10 @@ def create_app(args):
     _log_role_provider_options(rag)
 
     entity_merge = None
-    if args.vector_storage == "MilvusVectorDBStorage" and args.graph_storage == "Neo4JStorage":
+    if (
+        args.vector_storage == "MilvusVectorDBStorage"
+        and args.graph_storage == "Neo4JStorage"
+    ):
         entity_merge = EntityMergeManager(rag, args.working_dir, args.workspace)
         rag.entity_merge = entity_merge
 
@@ -2610,11 +2614,19 @@ def create_app(args):
     app.include_router(create_document_routes(rag, doc_manager, api_key))
     app.include_router(create_query_routes(rag, api_key, args.top_k))
     app.include_router(
-        create_data_workflow_routes(DataWorkflowService(args.workspace), api_key)
+        create_data_workflow_routes(
+            DataWorkflowService(
+                args.workspace,
+                batch_lookup=lambda batch_id: resolve_batch(rag, batch_id),
+            ),
+            api_key,
+        )
     )
     app.include_router(create_graph_routes(rag, api_key))
     if entity_merge is not None:
-        app.include_router(create_entity_merge_routes(entity_merge, api_key, args.workers))
+        app.include_router(
+            create_entity_merge_routes(entity_merge, api_key, args.workers)
+        )
     # Local prompt overlay: one isolated router and no edits to upstream routes.
     prompt_admin = PromptAdmin(rag, args.working_dir, args.workspace, args.workers)
     app.include_router(create_prompt_admin_routes(prompt_admin, api_key))

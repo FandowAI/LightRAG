@@ -18,6 +18,7 @@ primary at all, which the repair endpoint cannot settle.
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import numpy as np
@@ -34,6 +35,98 @@ from lightrag.utils_pipeline import (
 )
 
 pytestmark = pytest.mark.offline
+
+
+@pytest.mark.parametrize("count", [2, 3])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_concurrent_parsers_keep_one_primary_without_duplicate_cycles(
+    tmp_path, count, reverse
+):
+    async def run():
+        from lightrag.base import DocProcessingStatus
+
+        rag = await _build_rag(tmp_path)
+        try:
+            ids = [f"doc-{i}" for i in range(count)]
+            rows = {
+                key: {
+                    **_row("same-content", f"2026-01-0{i + 1}T00:00:00"),
+                    "status": DocStatus.PARSING,
+                    "file_path": f"{key}.md",
+                }
+                for i, key in enumerate(ids)
+            }
+            await rag.doc_status.upsert(rows)
+            await rag.full_docs.upsert({key: {"content": "same body"} for key in ids})
+            original_upsert = rag.doc_status.upsert
+
+            async def yielding_upsert(data):
+                await asyncio.sleep(0)
+                return await original_upsert(data)
+
+            rag.doc_status.upsert = yielding_upsert
+
+            async def mark(key):
+                status = DocProcessingStatus(
+                    **{k: v for k, v in rows[key].items() if k not in {"content_hash"}},
+                    content_hash="same-content",
+                )
+                return await rag._mark_duplicate_after_parse(
+                    key, status, f"{key}.md", "same-content", 9
+                )
+
+            with patch(
+                "lightrag.pipeline.archive_source_after_full_docs_sync",
+                new=AsyncMock(return_value=None),
+            ):
+                await asyncio.gather(
+                    *(mark(key) for key in (list(reversed(ids)) if reverse else ids))
+                )
+            saved = {key: await rag.doc_status.get_by_id(key) for key in ids}
+            assert not saved[ids[0]]["metadata"].get("is_duplicate")
+            assert await rag.full_docs.get_by_id(ids[0]) is not None
+            for key in ids[1:]:
+                assert saved[key]["status"] == DocStatus.SKIPPED
+                assert saved[key]["metadata"]["original_doc_id"] == ids[0]
+                assert await rag.full_docs.get_by_id(key) is None
+        finally:
+            await rag.finalize_storages()
+
+    asyncio.run(run())
+
+
+def test_recovery_priority_keeps_the_normal_sweep_cursor(tmp_path, monkeypatch):
+    from lightrag.base import CURSOR_START
+
+    monkeypatch.setenv("LIGHTRAG_RECOVERY_DOC_IDS", "doc-recovered")
+
+    async def run():
+        rag = await _build_rag(tmp_path)
+        try:
+            rows = {
+                key: {**_row(key, "2026-01-01T00:00:00"), "status": DocStatus.PENDING}
+                for key in ["doc-ordinary", "doc-recovered"]
+            }
+            await rag.doc_status.upsert(rows)
+            docs, cursor = await rag._next_scheduling_page(
+                (DocStatus.PENDING,), CURSOR_START
+            )
+            assert list(docs) == ["doc-recovered"]
+            assert cursor is CURSOR_START
+            await rag.doc_status.upsert(
+                {
+                    "doc-recovered": {
+                        **rows["doc-recovered"],
+                        "status": DocStatus.PROCESSED,
+                    }
+                }
+            )
+            docs, _ = await rag._next_scheduling_page((DocStatus.PENDING,), cursor)
+            assert list(docs) == ["doc-ordinary"]
+        finally:
+            await rag.finalize_storages()
+
+    asyncio.run(run())
 
 
 class _DummyEmbeddingFunc:

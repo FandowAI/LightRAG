@@ -3,11 +3,12 @@
 version: 1
 project_directory: /root/data-work-flow
 # Keep the venv interpreter path; do not substitute its resolved symlink target.
-python: /root/data-work-flow/.venv-api/bin/python
+python: /root/data-work-flow/.venv-qa/bin/python
 workflow_config: data_workflow_job.yaml
 # Set to a credentials-only .env file, or leave null to use process credentials.
-credentials_file: null
+credentials_file: /data/lightrag/config/qa.credentials.env
 jobs_directory: ../runs/data-workflow
+# Used only by directory submissions. Batch buttons locate packages.jsonl by batch ID.
 input:
   # JSON file, JSON array, JSONL, directory, or glob. Finish writing before submit.
   # Example: [../incoming/query-results]

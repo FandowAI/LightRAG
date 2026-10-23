@@ -516,7 +516,7 @@ server {
      把 `MAX_REQUEST_BODY_BYTES` 设为任意正值时，该值将统一作用于除上传外的所有路由（含摄取路由）——即使该值恰好等于 1 MiB 默认值也是如此，这正是分档出现之前该配置项的行为。设为 `0` 则关闭全部上限（含派生的上传上限），启动时会给出告警。
    - **输入字段上限**作用于 `/query*`、`/api/chat`、`/api/generate` 的模型侧字段：单个 query/prompt 64 KiB、单条消息 32 KiB、每请求模型侧文本合计 128 KiB、最多 128 条消息，以及 `top_k` / `chunk_top_k`（1000）与 `max_*_tokens`（1,000,000）的上界。这些上限刻意不做成配置项——一个用来阻止未认证调用者决定服务端 CPU 开销的限制，如果可以被配错，就等于没有。`/query*` 超限返回 **422**（FastAPI 原生校验响应），`/api/*` 返回 **413**。
    - **查询不得为空**：去除首尾空白后为空的查询在所有路径上都会被拒绝，包括 `bypass`、Open WebUI 元数据任务和 `/api/generate`。豁免下面的最小长度并不等于可以不带提示词。
-   - **RAG 查询最小长度**：去除首尾空白后，检索模式要求查询的英文等效长度至少为 3。每个中日韩字符按 2 计算，其他 Unicode 字符按 1 计算。该规则适用于核心查询 API、`/query*` 和 `/api/chat` 的 RAG 分支；`bypass`、直接转发给 LLM 的 Open WebUI 元数据任务以及 `/api/generate` 仅豁免最小长度这一条。`/query` 与 `/query/stream` 返回 **422**，`/query/data` 返回 **400**，`/api/*` 返回 **400**。
+   - **RAG 查询最小长度**：去除首尾空白后，检索模式要求查询的英文等效长度至少为 3。每个中日韩字符按 2 计算，其他 Unicode 字符按 1 计算。该规则适用于核心查询 API、`/query*` 和 `/api/chat` 的 RAG 分支；精确实体 `graph`、`bypass`、直接转发给 LLM 的 Open WebUI 元数据任务以及 `/api/generate` 仅豁免最小长度这一条。`/query` 与 `/query/stream` 返回 **422**，`/query/data` 返回 **400**，`/api/*` 返回 **400**。
    - `MAX_TEXTS_PER_REQUEST` 限制单个 `/documents/texts` 请求可携带的文本数量，在任何逐条存储查询之前就返回 **413**。它限制的是单个请求的扇出，因此与下面的容量上限不同，**不是**"稍后重试"类条件：超限的批次无论等多久都不会被接受，必须拆分。
    - `MAX_PENDING_DOCUMENTS` 限制可同时处于活跃状态（`PENDING`/`PARSING`/`ANALYZING`/`PROCESSING`）或被在飞请求预留的文档数。超容量时返回 **429**,带 `Retry-After` 头,detail 里给出当前数量、本次请求数量与容量——且**在 body 传输之前**就拒绝。`/documents/scan` 与人工重试按设计突破该上限;它们产生的文档会让普通上传排队等待。
 
@@ -604,6 +604,20 @@ sudo systemctl status lightrag.service
 sudo systemctl enable lightrag.service
 ```
 
+## 精确实体图查询
+
+在 `/query`、`/query/stream` 或 `/query/data` 中使用 `mode: "graph"`，可以从精确规范化后的实体标识开始遍历邻域；该模式不会执行关键词提取、向量检索或重排。`graph_depth` 取值范围为 `0`～`5`，`0` 仅返回根实体，默认值为 `1`。
+
+```json
+{
+  "query": "A",
+  "mode": "graph",
+  "graph_depth": 2
+}
+```
+
+批量生成结构化数据时，可调用 `/query/data/batch`，参数包括 `entities`、`graph_depth`、`deduplicate_relations` 和 `deduplicate_chunks_in_batch`。启用关系去重后，前面已处理的实体根会成为后续遍历的边界：后续结果只裁掉进入先前根实体的分支，其他分支仍会保留，即使其中某些关系已经出现在前一个结果中。该状态仅在当前请求内生效，并严格按照输入顺序处理；不同请求之间不共享状态。
+
 ## Ollama 模拟
 
 我们为 LightRAG 提供了 Ollama 兼容接口，旨在将 LightRAG 模拟为 Ollama 聊天模型。这使得支持 Ollama 的 AI 聊天前端（如 Open WebUI）可以轻松访问 LightRAG。
@@ -622,7 +636,7 @@ Open WebUI 使用 LLM 来执行会话标题和会话关键词生成任务。因�
 
 查询字符串中的查询前缀可以决定使用哪种 LightRAG 查询模式来生成响应。支持的前缀包括：
 
-去除模式前缀后，RAG 查询的英文等效长度必须至少为 3；每个中日韩字符按 2 计算。直接调用 LLM 的 `/bypass` 请求不受此最小长度限制，但任何请求都不得携带空查询——若模式前缀吞掉了整条消息（如 `/local[hint]`），将返回 **400**。
+去除模式前缀后，RAG 查询的英文等效长度必须至少为 3；每个中日韩字符按 2 计算。精确实体 `/graph` 和直接调用 LLM 的 `/bypass` 请求不受此最小长度限制，但任何请求都不得携带空查询——若模式前缀吞掉了整条消息（如 `/local[hint]`），将返回 **400**。
 
 ```
 /local
@@ -630,6 +644,7 @@ Open WebUI 使用 LLM 来执行会话标题和会话关键词生成任务。因�
 /hybrid
 /naive
 /mix
+/graph
 
 /bypass
 /context
@@ -638,9 +653,12 @@ Open WebUI 使用 LLM 来执行会话标题和会话关键词生成任务。因�
 /hybridcontext
 /naivecontext
 /mixcontext
+/graphcontext
 ```
 
 例如，聊天消息 "/mix 唐僧有几个徒弟" 将触发 LightRAG 的混合模式查询。没有查询前缀的聊天消息默认会触发混合模式查询。
+
+`/graph` 的遍历深度默认为 `1`；Ollama 客户端可通过 `options.graph_depth` 覆盖，取值范围为 `0`～`5`。
 
 "/bypass" 不是 LightRAG 查询模式，它会告诉 API 服务器将查询连同聊天历史直接传递给底层 LLM。因此用户可以使用 LLM 基于聊天历史回答问题。如果您使用 Open WebUI 作为前端，您可以直接切换到普通 LLM 模型，而不是使用 /bypass 前缀。
 

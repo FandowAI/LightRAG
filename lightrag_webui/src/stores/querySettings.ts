@@ -32,6 +32,7 @@ interface QuerySettingsState {
 
 export const defaultQuerySettings: QuerySettings = {
   mode: 'mix',
+  graph_depth: 1,
   top_k: 40,
   chunk_top_k: 20,
   max_entity_tokens: 6000,

@@ -1,5 +1,5 @@
 # Source-to-QA classification, expert review and at most one revision by default.
-# Replace endpoint/model names before real calls. All paths are YAML-relative.
+# Tencent TokenHub DeepSeek API. All paths are YAML-relative.
 # This is the bridge-owned copy of review_classifition.yaml.
 # Configure source locations in data_workflow.yaml; input/output below are
 # replaced in each job snapshot. Relative prompt_file paths use this directory.
@@ -13,18 +13,18 @@ runtime:
   max_inflight_requests: 2
 models:
   generation:
-    api_url: https://api.example.com/v1/chat/completions
-    model_name: replace-with-generation-model
+    api_url: https://tokenhub.tencentmaas.com/v1/chat/completions
+    model_name: deepseek-v4-flash-0731
     key_name_of_api_key: QA_API_KEY
     max_workers: 1
   classifier:
-    api_url: https://api.example.com/v1/chat/completions
-    model_name: replace-with-classification-model
+    api_url: https://tokenhub.tencentmaas.com/v1/chat/completions
+    model_name: deepseek-v4-flash-0731
     key_name_of_api_key: CLASSIFIER_API_KEY
     max_workers: 1
   judge:
-    api_url: https://api.example.com/v1/chat/completions
-    model_name: replace-with-judge-model
+    api_url: https://tokenhub.tencentmaas.com/v1/chat/completions
+    model_name: deepseek-v4-flash-0731
     key_name_of_api_key: JUDGE_API_KEY
     max_workers: 1
 workflow:

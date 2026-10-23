@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
 
@@ -78,6 +78,9 @@ from lightrag.chunk_schema import (
 )
 from lightrag.prompt import PROMPTS, resolve_entity_extraction_prompt_profile
 from lightrag.prompt_admin_cache import prompt_admin_cache_digest
+from lightrag.enterprise_knowledge import (
+    parsed_metadata, metadata_for_graph, surviving_metadata, remap_cached_fragments, knowledge_context,
+)
 from lightrag.constants import (
     GRAPH_FIELD_SEP,
     DEFAULT_MAX_ENTITY_TOKENS,
@@ -129,6 +132,21 @@ class QueryProgress:
 
 # Type alias for the async progress callback: receives a QueryProgress event string.
 ProgressCallback = Callable[[str], Awaitable[None]]
+
+
+GRAPH_QUERY_MAX_NODES = 100
+GRAPH_QUERY_MAX_RELATIONS = 200
+
+
+@dataclass
+class GraphTraversalResult:
+    """Deterministic, bounded result of one exact-root graph traversal."""
+
+    root_entity: str
+    nodes: dict[str, dict[str, Any]]
+    relations: dict[tuple[str, str], dict[str, Any]]
+    is_truncated: bool = False
+    node_depths: dict[str, int] = field(default_factory=dict)
 
 
 KGRebuildPolicy = Literal["best_effort", "rollback"]
@@ -1013,6 +1031,7 @@ async def _process_json_extraction_result(
                 file_path=file_path,
                 timestamp=timestamp,
             )
+            node_data.update(parsed_metadata(entity_data))
             maybe_nodes[truncated_name].append(node_data)
 
         except Exception as e:
@@ -1276,6 +1295,14 @@ async def rebuild_knowledge_from_chunks(
             status_logger.log(status_message)
             continue
 
+    canonical_names = set(entities_to_rebuild)
+    for pair in relationships_to_rebuild:
+        canonical_names.update(pair)
+    identity_errors = await remap_cached_fragments(
+        chunk_entities, chunk_relationships, canonical_names, knowledge_graph_inst,
+        strict=rebuild_policy == "rollback",
+    )
+
     # Get max async tasks limit from global_config for semaphore control
     graph_max_async = global_config.get("llm_model_max_async", 4) * 2
     semaphore = asyncio.Semaphore(graph_max_async)
@@ -1296,6 +1323,8 @@ async def rebuild_knowledge_from_chunks(
                 [entity_name], namespace=namespace, enable_logging=False
             ):
                 try:
+                    if entity_name in identity_errors:
+                        raise identity_errors[entity_name]
                     degraded = await _rebuild_single_entity(
                         knowledge_graph_inst=knowledge_graph_inst,
                         entities_vdb=entities_vdb,
@@ -1334,6 +1363,9 @@ async def rebuild_knowledge_from_chunks(
                 enable_logging=False,
             ):
                 try:
+                    for endpoint in (src, tgt):
+                        if endpoint in identity_errors:
+                            raise identity_errors[endpoint]
                     degraded = await _rebuild_single_relationship(
                         knowledge_graph_inst=knowledge_graph_inst,
                         relationships_vdb=relationships_vdb,
@@ -1792,6 +1824,8 @@ async def _rebuild_single_entity(
                 "created_at": int(time.time()),
                 "truncate": truncation_info,
             }
+
+            updated_entity_data.update(surviving_metadata(current_entity, chunk_ids))
 
             # Construct and verify the VDB payload BEFORE the first graph
             # mutation: if truncation fails (a deterministic, non-retryable
@@ -2448,6 +2482,7 @@ async def _merge_nodes_then_upsert(
         # throwaway logger reproduces the one-shot helper's behavior.
         status_logger = PipelineStatusLogger(pipeline_status)
     timing_start = time.perf_counter()
+    all_fact_rows = list(nodes_data)
     try:
         already_entity_types = []
         already_source_ids = []
@@ -2562,6 +2597,10 @@ async def _merge_nodes_then_upsert(
                     f"{len(existing_full_source_ids)}/{len(full_source_ids)} (limit {max_source_limit})"
                 )
                 existing_node_data = dict(already_node)
+                facts = metadata_for_graph(all_fact_rows, already_node, full_source_ids)
+                if any(existing_node_data.get(key) != value for key, value in facts.items()):
+                    existing_node_data.update(facts)
+                    await knowledge_graph_inst.upsert_node(entity_name, existing_node_data)
                 return existing_node_data
             else:
                 logger.error(
@@ -2735,6 +2774,8 @@ async def _merge_nodes_then_upsert(
             created_at=int(time.time()),
             truncate=truncation_info,
         )
+
+        node_data.update(metadata_for_graph(all_fact_rows, already_node, full_source_ids))
 
         # Construct and verify the VDB payload BEFORE the first graph
         # mutation: if truncation fails (a deterministic, non-retryable
@@ -4691,6 +4732,627 @@ def _answer_cache_kv(
     return hashing_kv
 
 
+def _tracked_chunk_ids(
+    tracking: Any,
+    fallback_source_id: Any,
+    *,
+    relation: bool = False,
+) -> list[str]:
+    """Resolve object evidence without overriding an authoritative empty row."""
+
+    if has_chunk_tracking_row(tracking):
+        chunk_ids = tracking["chunk_ids"]
+    elif isinstance(fallback_source_id, str):
+        chunk_ids = split_string_by_multi_markers(
+            fallback_source_id, [GRAPH_FIELD_SEP]
+        )
+    else:
+        chunk_ids = []
+
+    if relation:
+        chunk_ids = [
+            chunk_id
+            for chunk_id in chunk_ids
+            if chunk_id not in RELATION_NO_EVIDENCE_SOURCE_IDS
+        ]
+    return list(dict.fromkeys(chunk_id for chunk_id in chunk_ids if chunk_id))
+
+
+async def _traverse_graph_from_entity(
+    root_entity: str,
+    graph_depth: int,
+    knowledge_graph_inst: BaseGraphStorage,
+    *,
+    max_nodes: int = GRAPH_QUERY_MAX_NODES,
+    max_relations: int = GRAPH_QUERY_MAX_RELATIONS,
+) -> GraphTraversalResult | None:
+    """Traverse an exact entity neighborhood with deterministic bounded DFS."""
+
+    root_data = await knowledge_graph_inst.get_node(root_entity)
+    if root_data is None:
+        return None
+
+    nodes: dict[str, dict[str, Any]] = {root_entity: dict(root_data)}
+    relations: dict[tuple[str, str], dict[str, Any]] = {}
+    node_depths: dict[str, int] = {root_entity: 0}
+    expanded_depths: dict[str, int] = {}
+    stack: list[tuple[str, int]] = [(root_entity, 0)]
+    is_truncated = False
+
+    while stack:
+        current_entity, current_depth = stack.pop()
+        previous_expansion_depth = expanded_depths.get(current_entity)
+        if (
+            previous_expansion_depth is not None
+            and previous_expansion_depth <= current_depth
+        ):
+            continue
+        expanded_depths[current_entity] = current_depth
+
+        if current_depth >= graph_depth:
+            continue
+
+        node_edges = await knowledge_graph_inst.get_node_edges(current_entity)
+        if node_edges is None:
+            # The root was confirmed above. A later disappearance means the
+            # graph changed during the read; skip that branch without turning
+            # it into a fabricated isolated node.
+            continue
+
+        canonical_edges = sorted(
+            {tuple(sorted((src, tgt))) for src, tgt in node_edges}, reverse=True
+        )
+        for src_id, tgt_id in canonical_edges:
+            edge_key = (src_id, tgt_id)
+            neighbor = tgt_id if src_id == current_entity else src_id
+
+            neighbor_data: dict[str, Any] | None = None
+            if neighbor not in nodes:
+                if len(nodes) >= max_nodes:
+                    is_truncated = True
+                    continue
+                neighbor_data = await knowledge_graph_inst.get_node(neighbor)
+                if neighbor_data is None:
+                    logger.warning(
+                        "Graph query skipped relation %s-%s because endpoint %s is missing",
+                        src_id,
+                        tgt_id,
+                        neighbor,
+                    )
+                    continue
+
+            edge_data: dict[str, Any] | None = None
+            if edge_key not in relations:
+                if len(relations) >= max_relations:
+                    is_truncated = True
+                    continue
+                edge_data = await knowledge_graph_inst.get_edge(src_id, tgt_id)
+                if edge_data is None:
+                    logger.warning(
+                        "Graph query skipped missing relation properties for %s-%s",
+                        src_id,
+                        tgt_id,
+                    )
+                    continue
+
+            # Commit the endpoint and relation together. This prevents the
+            # relation cap from leaving behind a node that was never actually
+            # connected in the returned traversal.
+            if neighbor_data is not None:
+                nodes[neighbor] = dict(neighbor_data)
+            node_depths[neighbor] = min(
+                node_depths.get(neighbor, current_depth + 1), current_depth + 1
+            )
+            if edge_data is not None:
+                relations[edge_key] = dict(edge_data)
+
+            if current_depth + 1 <= graph_depth:
+                stack.append((neighbor, current_depth + 1))
+
+    return GraphTraversalResult(
+        root_entity=root_entity,
+        nodes=nodes,
+        relations=relations,
+        is_truncated=is_truncated,
+        node_depths=node_depths,
+    )
+
+
+async def _graph_chunks(
+    traversal: GraphTraversalResult,
+    text_chunks_db: BaseKVStorage,
+    entity_chunks_storage: BaseKVStorage,
+    relation_chunks_storage: BaseKVStorage,
+) -> list[dict[str, Any]]:
+    """Load every tracked chunk for the traversal, preserving stable order."""
+
+    entity_names = sorted(traversal.nodes)
+    relation_pairs = sorted(traversal.relations)
+    relation_keys = [make_relation_chunk_key(*pair) for pair in relation_pairs]
+
+    entity_tracking = await entity_chunks_storage.get_by_ids(entity_names)
+    relation_tracking = await relation_chunks_storage.get_by_ids(relation_keys)
+
+    chunk_ids: list[str] = []
+    for entity_name, tracking in zip(entity_names, entity_tracking):
+        chunk_ids.extend(
+            _tracked_chunk_ids(
+                tracking,
+                traversal.nodes[entity_name].get("source_id"),
+            )
+        )
+    for relation_pair, tracking in zip(relation_pairs, relation_tracking):
+        chunk_ids.extend(
+            _tracked_chunk_ids(
+                tracking,
+                traversal.relations[relation_pair].get("source_id"),
+                relation=True,
+            )
+        )
+
+    unique_chunk_ids = list(dict.fromkeys(chunk_ids))
+    chunk_rows = await text_chunks_db.get_by_ids(unique_chunk_ids)
+    chunks: list[dict[str, Any]] = []
+    for chunk_id, chunk_row in zip(unique_chunk_ids, chunk_rows):
+        if not isinstance(chunk_row, dict) or "content" not in chunk_row:
+            logger.warning("Graph query skipped missing text chunk %s", chunk_id)
+            continue
+        chunks.append({**chunk_row, "chunk_id": chunk_id})
+    return chunks
+
+
+def _graph_context_rows(
+    traversal: GraphTraversalResult,
+) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    dict[str, dict[str, Any]],
+    dict[tuple[str, str], dict[str, Any]],
+]:
+    """Convert a traversal to the common context rows in hop-first order."""
+
+    entity_id_to_original: dict[str, dict[str, Any]] = {}
+    entities_context: list[dict[str, Any]] = []
+    ordered_entity_names = sorted(
+        traversal.nodes,
+        key=lambda entity_name: (
+            traversal.node_depths.get(
+                entity_name, 0 if entity_name == traversal.root_entity else 10**9
+            ),
+            entity_name,
+        ),
+    )
+    for entity_name in ordered_entity_names:
+        node_data = traversal.nodes[entity_name]
+        entity_id_to_original[entity_name] = {
+            **node_data,
+            "entity_name": entity_name,
+        }
+        entities_context.append(
+            {
+                "entity": entity_name,
+                "type": node_data.get("entity_type", "UNKNOWN"),
+                "description": node_data.get("description", ""),
+                "source_id": node_data.get("source_id", ""),
+                "file_path": node_data.get("file_path", "unknown_source"),
+                "created_at": node_data.get("created_at", ""),
+            }
+        )
+
+    relation_id_to_original: dict[tuple[str, str], dict[str, Any]] = {}
+    relations_context: list[dict[str, Any]] = []
+    ordered_relation_pairs = sorted(
+        traversal.relations,
+        key=lambda pair: (
+            max(
+                traversal.node_depths.get(pair[0], 10**9),
+                traversal.node_depths.get(pair[1], 10**9),
+            ),
+            pair,
+        ),
+    )
+    for src_id, tgt_id in ordered_relation_pairs:
+        edge_data = traversal.relations[(src_id, tgt_id)]
+        relation_id_to_original[(src_id, tgt_id)] = {
+            **edge_data,
+            "src_id": src_id,
+            "tgt_id": tgt_id,
+        }
+        relations_context.append(
+            {
+                "entity1": src_id,
+                "entity2": tgt_id,
+                "description": edge_data.get("description", ""),
+                "keywords": edge_data.get("keywords", ""),
+                "weight": edge_data.get("weight", 1.0),
+                "source_id": edge_data.get("source_id", ""),
+                "file_path": edge_data.get("file_path", "unknown_source"),
+                "created_at": edge_data.get("created_at", ""),
+            }
+        )
+
+    return (
+        entities_context,
+        relations_context,
+        entity_id_to_original,
+        relation_id_to_original,
+    )
+
+
+def _reachable_graph_nodes(
+    root_entity: str,
+    relations_context: list[dict[str, Any]],
+) -> set[str]:
+    """Return the root-connected component represented by relationship rows."""
+
+    adjacency: dict[str, set[str]] = defaultdict(set)
+    for relation in relations_context:
+        src_id = relation["entity1"]
+        tgt_id = relation["entity2"]
+        adjacency[src_id].add(tgt_id)
+        adjacency[tgt_id].add(src_id)
+
+    reachable = {root_entity}
+    stack = [root_entity]
+    while stack:
+        current = stack.pop()
+        for neighbor in sorted(adjacency[current], reverse=True):
+            if neighbor not in reachable:
+                reachable.add(neighbor)
+                stack.append(neighbor)
+    return reachable
+
+
+async def _graph_raw_data_from_traversal(
+    query: str,
+    graph_depth: int,
+    traversal: GraphTraversalResult,
+    text_chunks_db: BaseKVStorage,
+    entity_chunks_storage: BaseKVStorage,
+    relation_chunks_storage: BaseKVStorage,
+    *,
+    candidate_nodes: int | None = None,
+    candidate_relationships: int | None = None,
+    deduplicated_relationships: list[str] | None = None,
+    exclude_chunk_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    """Format a bounded traversal without applying LLM token budgets."""
+
+    (
+        entities_context,
+        relations_context,
+        entity_id_to_original,
+        relation_id_to_original,
+    ) = _graph_context_rows(traversal)
+    chunks = await _graph_chunks(
+        traversal,
+        text_chunks_db,
+        entity_chunks_storage,
+        relation_chunks_storage,
+    )
+    deduplicated_chunks: list[str] = []
+    if exclude_chunk_ids:
+        retained_chunks: list[dict[str, Any]] = []
+        for chunk in chunks:
+            chunk_id = chunk.get("chunk_id")
+            if chunk_id and chunk_id in exclude_chunk_ids:
+                deduplicated_chunks.append(chunk_id)
+            else:
+                retained_chunks.append(chunk)
+        chunks = retained_chunks
+
+    references, chunks = generate_reference_list_from_chunks(chunks)
+    raw_data = convert_to_user_format(
+        entities_context,
+        relations_context,
+        chunks,
+        references,
+        "graph",
+        entity_id_to_original,
+        relation_id_to_original,
+    )
+    raw_data["message"] = "Entity graph query completed"
+    raw_data.setdefault("metadata", {}).update(
+        {
+            "query_mode": "graph",
+            "requested_entity": query,
+            "root_entity": traversal.root_entity,
+            "graph_depth": graph_depth,
+            "traversal": "dfs",
+            "candidate_nodes": candidate_nodes
+            if candidate_nodes is not None
+            else len(traversal.nodes),
+            "candidate_relationships": candidate_relationships
+            if candidate_relationships is not None
+            else len(traversal.relations),
+            "returned_nodes": len(entities_context),
+            "returned_relationships": len(relations_context),
+            "retrieved_chunks": len(chunks) + len(deduplicated_chunks),
+            "returned_chunks": len(chunks),
+            "deduplicated_relationships": deduplicated_relationships or [],
+            "deduplicated_chunks": deduplicated_chunks,
+            "is_truncated": traversal.is_truncated,
+        }
+    )
+    return raw_data
+
+
+async def graph_query_data(
+    query: str,
+    knowledge_graph_inst: BaseGraphStorage,
+    text_chunks_db: BaseKVStorage,
+    entity_chunks_storage: BaseKVStorage,
+    relation_chunks_storage: BaseKVStorage,
+    query_param: QueryParam,
+) -> QueryResult | None:
+    """Return the complete bounded exact-entity subgraph without LLM truncation."""
+
+    if not 0 <= query_param.graph_depth <= 5:
+        raise ValueError("graph_depth must be between 0 and 5")
+    root_entity = normalize_entity_name(query)
+    traversal = await _traverse_graph_from_entity(
+        root_entity,
+        query_param.graph_depth,
+        knowledge_graph_inst,
+    )
+    if traversal is None:
+        logger.info("[graph_query_data] Entity not found: %s", root_entity)
+        return None
+    raw_data = await _graph_raw_data_from_traversal(
+        query,
+        query_param.graph_depth,
+        traversal,
+        text_chunks_db,
+        entity_chunks_storage,
+        relation_chunks_storage,
+    )
+    return QueryResult(content="", raw_data=raw_data, llm_generated=False)
+
+
+async def graph_query(
+    query: str,
+    knowledge_graph_inst: BaseGraphStorage,
+    text_chunks_db: BaseKVStorage,
+    entity_chunks_storage: BaseKVStorage,
+    relation_chunks_storage: BaseKVStorage,
+    query_param: QueryParam,
+    global_config: dict[str, Any],
+    hashing_kv: BaseKVStorage | None = None,
+    system_prompt: str | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> QueryResult | None:
+    """Query an exact entity neighborhood without keyword or vector retrieval."""
+
+    if not 0 <= query_param.graph_depth <= 5:
+        raise ValueError("graph_depth must be between 0 and 5")
+
+    root_entity = normalize_entity_name(query)
+    if progress_callback:
+        await progress_callback(QueryProgress.RETRIEVING_ENTITIES)
+    traversal = await _traverse_graph_from_entity(
+        root_entity,
+        query_param.graph_depth,
+        knowledge_graph_inst,
+    )
+    if traversal is None:
+        logger.info("[graph_query] Entity not found: %s", root_entity)
+        return None
+
+    (
+        entities_context,
+        relations_context,
+        entity_id_to_original,
+        relation_id_to_original,
+    ) = _graph_context_rows(traversal)
+
+    tokenizer = global_config.get("tokenizer")
+    if tokenizer is not None:
+        entities_context = await atruncate_list_by_token_size(
+            entities_context,
+            key=lambda item: json.dumps(item, ensure_ascii=False),
+            separator="\n",
+            max_token_size=query_param.max_entity_tokens,
+            tokenizer=tokenizer,
+        )
+        retained_entities = {item["entity"] for item in entities_context}
+        relations_context = [
+            relation
+            for relation in relations_context
+            if relation["entity1"] in retained_entities
+            and relation["entity2"] in retained_entities
+        ]
+        relations_context = await atruncate_list_by_token_size(
+            relations_context,
+            key=lambda item: json.dumps(item, ensure_ascii=False),
+            separator="\n",
+            max_token_size=query_param.max_relation_tokens,
+            tokenizer=tokenizer,
+        )
+
+        # Relation token truncation can cut the only path to a retained node.
+        # Keep only the root-connected component so an LLM never receives a
+        # bag of disconnected entities masquerading as a subgraph.
+        connected_entities = _reachable_graph_nodes(root_entity, relations_context)
+        entities_context = [
+            entity
+            for entity in entities_context
+            if entity["entity"] in connected_entities
+        ]
+        relations_context = [
+            relation
+            for relation in relations_context
+            if relation["entity1"] in connected_entities
+            and relation["entity2"] in connected_entities
+        ]
+
+    retained_entities = {item["entity"] for item in entities_context}
+    retained_relation_pairs = {
+        (item["entity1"], item["entity2"]) for item in relations_context
+    }
+    context_traversal = GraphTraversalResult(
+        root_entity=traversal.root_entity,
+        nodes={
+            entity_name: node_data
+            for entity_name, node_data in traversal.nodes.items()
+            if entity_name in retained_entities
+        },
+        relations={
+            pair: edge_data
+            for pair, edge_data in traversal.relations.items()
+            if pair in retained_relation_pairs
+        },
+        is_truncated=traversal.is_truncated,
+        node_depths={
+            entity_name: depth
+            for entity_name, depth in traversal.node_depths.items()
+            if entity_name in retained_entities
+        },
+    )
+    if progress_callback:
+        await progress_callback(QueryProgress.RETRIEVING_CHUNKS)
+    chunks = await _graph_chunks(
+        context_traversal,
+        text_chunks_db,
+        entity_chunks_storage,
+        relation_chunks_storage,
+    )
+
+    # Graph mode intentionally ignores the vector/rerank chunk controls. Token
+    # budgeting remains active so /query and /query/stream cannot overfill the
+    # answering model's context window.
+    build_param = replace(
+        query_param,
+        enable_rerank=False,
+        chunk_top_k=max(len(chunks), 1),
+    )
+    context, raw_data = await _build_context_str(
+        entities_context=entities_context,
+        relations_context=relations_context,
+        merged_chunks=chunks,
+        query=query,
+        query_param=build_param,
+        global_config=global_config,
+        entity_id_to_original=entity_id_to_original,
+        relation_id_to_original=relation_id_to_original,
+        progress_callback=progress_callback,
+        system_prompt=system_prompt,
+    )
+    data = raw_data.get("data", {})
+    raw_data.setdefault("metadata", {}).update(
+        {
+            "query_mode": "graph",
+            "requested_entity": query,
+            "root_entity": root_entity,
+            "graph_depth": query_param.graph_depth,
+            "traversal": "dfs",
+            "candidate_nodes": len(traversal.nodes),
+            "candidate_relationships": len(traversal.relations),
+            "returned_nodes": len(data.get("entities", [])),
+            "returned_relationships": len(data.get("relationships", [])),
+            "retrieved_chunks": len(chunks),
+            "returned_chunks": len(data.get("chunks", [])),
+            "is_truncated": traversal.is_truncated
+            or len(data.get("entities", [])) < len(traversal.nodes)
+            or len(data.get("relationships", [])) < len(traversal.relations)
+            or len(data.get("chunks", [])) < len(chunks),
+        }
+    )
+
+    context_result = QueryContextResult(context=context, raw_data=raw_data)
+    if query_param.only_need_context and not query_param.only_need_prompt:
+        return QueryResult(
+            content=context_result.context,
+            raw_data=context_result.raw_data,
+            llm_generated=False,
+        )
+
+    effective_user_prompt = resolve_user_prompt(
+        query_param.user_prompt,
+        global_config.get("user_prompt_prefix", ""),
+        query_param.disable_user_prompt_prefix,
+    )
+    response_type = query_param.response_type or "Multiple Paragraphs"
+    sys_prompt_temp = system_prompt if system_prompt else PROMPTS["rag_response"]
+    sys_prompt = sys_prompt_temp.format(
+        response_type=response_type,
+        user_prompt=effective_user_prompt.slot,
+        context_data=context_result.context,
+    )
+    if query_param.only_need_prompt:
+        return QueryResult(
+            content="\n\n".join([sys_prompt, "---User Query---", query]),
+            raw_data=context_result.raw_data,
+            llm_generated=False,
+        )
+
+    use_model_func = partial(
+        global_config["role_llm_funcs"]["query"], _priority=DEFAULT_QUERY_PRIORITY
+    )
+    llm_cache_identity = get_llm_cache_identity(global_config, "query")
+    args_hash = compute_args_hash(
+        _ANSWER_CACHE_POLICY_VERSION,
+        "graph",
+        root_entity,
+        query_param.graph_depth,
+        query_param.response_type,
+        query_param.max_entity_tokens,
+        query_param.max_relation_tokens,
+        query_param.max_total_tokens,
+        effective_user_prompt.text,
+        *(("\n<system_prompt>\n", system_prompt) if system_prompt else ()),
+        "\n<llm_identity>\n",
+        serialize_llm_cache_identity(llm_cache_identity),
+    )
+    answer_cache_kv = _answer_cache_kv(query_param, hashing_kv)
+    cached_result = await handle_cache(
+        answer_cache_kv, args_hash, query, "graph", cache_type="query"
+    )
+    if cached_result is not None:
+        response, _ = cached_result
+    else:
+        if progress_callback:
+            await progress_callback(QueryProgress.GENERATING_RESPONSE)
+        response = await use_model_func(
+            query,
+            system_prompt=sys_prompt,
+            history_messages=query_param.conversation_history,
+            enable_cot=True,
+            stream=query_param.stream,
+        )
+        if (
+            answer_cache_kv
+            and answer_cache_kv.global_config.get("enable_llm_cache")
+            and not is_truncated_response(response)
+        ):
+            await save_to_cache(
+                answer_cache_kv,
+                CacheData(
+                    args_hash=args_hash,
+                    content=response,
+                    prompt=query,
+                    mode="graph",
+                    cache_type="query",
+                    queryparam={
+                        "answer_cache_version": _ANSWER_CACHE_POLICY_VERSION,
+                        "mode": "graph",
+                        "graph_depth": query_param.graph_depth,
+                        "response_type": query_param.response_type,
+                        "max_entity_tokens": query_param.max_entity_tokens,
+                        "max_relation_tokens": query_param.max_relation_tokens,
+                        "max_total_tokens": query_param.max_total_tokens,
+                    },
+                ),
+            )
+
+    if isinstance(response, str):
+        return QueryResult(content=response, raw_data=context_result.raw_data)
+    return QueryResult(
+        response_iterator=response,
+        raw_data=context_result.raw_data,
+        is_streaming=True,
+    )
+
+
 async def kg_query(
     query: str,
     knowledge_graph_inst: BaseGraphStorage,
@@ -5576,6 +6238,7 @@ async def _apply_token_truncation(
         entities_context.append(
             {
                 "entity": entity_name,
+                **knowledge_context(entity),
                 "type": entity.get("entity_type", "UNKNOWN"),
                 "description": entity.get("description", "UNKNOWN"),
                 "created_at": created_at,

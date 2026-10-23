@@ -51,7 +51,12 @@
     "historyHelp": "Every saved draft, publication, and reset keeps a snapshot. Loading a version opens it in the editor without changing the live prompt.",
     "noHistory": "No saved versions yet.",
     "loadVersion": "Load into editor",
-    "historyAction": { "draft": "Draft saved", "publish": "Published", "reset": "Before restoring Chinese defaults", "reset_english": "Before restoring English original" },
+    "historyAction": {
+      "draft": "Draft saved",
+      "publish": "Published",
+      "reset": "Before restoring Chinese defaults",
+      "reset_english": "Before restoring English original"
+    },
     "lifecycleHelp": "Publish saves your edits and applies them to new requests. Use the menu to save a draft only. Restore uses the configured Chinese defaults, or choose the project English original from its menu; both apply immediately and keep version history.",
     "discardEdits": "Discard unsaved edits",
     "saveDraft": "Save draft",
@@ -61,36 +66,102 @@
     "published": "Published for new requests",
     "resetDone": "Configured Chinese defaults restored",
     "resetDoneEnglish": "Project English original restored",
-    "status": { "active": "In use", "conditional": "Conditional", "inactive": "Not in use" },
-    "section": { "document": "Document understanding", "ingestion": "Graph ingestion", "query": "Retrieval and answer" },
-    "card": { "image": "Image analysis", "table": "Table analysis", "equation": "Equation analysis", "docx": "DOCX smart heading", "extraction": "Entity and relation extraction", "gleaning": "Extra extraction", "merge": "Description merge", "keywords": "Keyword extraction", "graph": "Graph answer", "naive": "Naive answer" },
-    "variant": { "json": "JSON output", "text": "Delimiter text output" },
+    "status": {
+      "active": "In use",
+      "conditional": "Conditional",
+      "inactive": "Not in use"
+    },
+    "section": {
+      "document": "Document understanding",
+      "ingestion": "Graph ingestion",
+      "query": "Retrieval and answer"
+    },
+    "card": {
+      "image": "Image analysis",
+      "table": "Table analysis",
+      "equation": "Equation analysis",
+      "docx": "DOCX smart heading",
+      "extraction": "Entity and relation extraction",
+      "gleaning": "Extra extraction",
+      "merge": "Description merge",
+      "keywords": "Keyword extraction",
+      "graph": "Graph answer",
+      "naive": "Naive answer"
+    },
+    "variant": {
+      "json": "JSON output",
+      "text": "Delimiter text output"
+    },
     "field": {
-      "image_analysis": "Image analysis instructions", "table_analysis": "Table analysis instructions", "equation_analysis": "Equation analysis instructions",
-      "docx_title_system": "System instruction", "docx_title_user": "User instruction",
-      "entity_extraction_json_system_prompt": "System instruction", "entity_extraction_json_user_prompt": "User instruction",
-      "entity_extraction_system_prompt": "System instruction", "entity_extraction_user_prompt": "User instruction",
+      "image_analysis": "Image analysis instructions",
+      "table_analysis": "Table analysis instructions",
+      "equation_analysis": "Equation analysis instructions",
+      "docx_title_system": "System instruction",
+      "docx_title_user": "User instruction",
+      "entity_extraction_json_system_prompt": "System instruction",
+      "entity_extraction_json_user_prompt": "User instruction",
+      "entity_extraction_system_prompt": "System instruction",
+      "entity_extraction_user_prompt": "User instruction",
       "default_entity_types_guidance": "Entity type guidance (shared)",
-      "entity_extraction_json_examples": "JSON output examples", "entity_extraction_examples": "Delimiter text examples",
+      "entity_extraction_json_examples": "JSON output examples",
+      "entity_extraction_examples": "Delimiter text examples",
       "entity_extraction_section_context": "Section context (shared)",
-      "entity_continue_extraction_json_user_prompt": "Extra extraction instructions (JSON)", "entity_continue_extraction_user_prompt": "Extra extraction instructions (text)",
-      "summarize_entity_descriptions": "Description merge instructions", "keywords_extraction": "Keyword extraction instructions", "keywords_extraction_examples": "Keyword output examples",
-      "rag_response": "Graph answer instructions", "kg_query_context": "Graph context format", "naive_rag_response": "Naive answer instructions", "naive_query_context": "Chunk context format",
+      "entity_continue_extraction_json_user_prompt": "Extra extraction instructions (JSON)",
+      "entity_continue_extraction_user_prompt": "Extra extraction instructions (text)",
+      "summarize_entity_descriptions": "Description merge instructions",
+      "keywords_extraction": "Keyword extraction instructions",
+      "keywords_extraction_examples": "Keyword output examples",
+      "rag_response": "Graph answer instructions",
+      "kg_query_context": "Graph context format",
+      "naive_rag_response": "Naive answer instructions",
+      "naive_query_context": "Chunk context format",
       "user_prompt_prefix": "Global answer instructions (shared)"
     },
     "reason": {
-      "image_analysis": { "inactive": "Markdown image analysis or its VLM role is disabled. Editing this prompt does not enable image processing.", "conditional": "Used when a Markdown image can be analyzed by the VLM." },
-      "table_analysis": { "inactive": "Markdown table analysis is disabled.", "conditional": "Used when Markdown contains a recognized table." },
-      "equation_analysis": { "inactive": "Markdown equation analysis is disabled.", "conditional": "Used when Markdown contains a recognized block equation." },
-      "docx_title": { "inactive": "DOCX smart heading is disabled. Markdown never uses this prompt.", "conditional": "Used for eligible DOCX title windows; never for Markdown." },
-      "extraction_json": { "active": "Entity extraction currently returns JSON, including for Markdown chunks.", "inactive": "Entity extraction currently returns delimiter text." },
-      "extraction_text": { "active": "Entity extraction currently returns delimiter text. This is independent of the Markdown file format.", "inactive": "Entity extraction currently returns JSON. Delimiter text is an output protocol, not a Markdown input format." },
-      "gleaning_json": { "conditional": "Used after JSON extraction unless the token budget skips it.", "inactive": "JSON extraction is off, or gleaning is set to zero." },
-      "gleaning_text": { "conditional": "Used after delimiter-text extraction unless the token budget skips it.", "inactive": "Delimiter-text extraction is off, or gleaning is set to zero." },
-      "description_merge": { "conditional": "Used when entity or relation descriptions require an LLM merge." },
-      "keywords": { "conditional": "Used for graph retrieval unless keywords are supplied or cached." },
-      "graph_answer": { "conditional": "Used for local, global, hybrid and mix answers; context-only skips the answer model." },
-      "naive_answer": { "conditional": "Used for Naive final answers; context-only skips the answer model." }
+      "image_analysis": {
+        "inactive": "Markdown image analysis or its VLM role is disabled. Editing this prompt does not enable image processing.",
+        "conditional": "Used when a Markdown image can be analyzed by the VLM."
+      },
+      "table_analysis": {
+        "inactive": "Markdown table analysis is disabled.",
+        "conditional": "Used when Markdown contains a recognized table."
+      },
+      "equation_analysis": {
+        "inactive": "Markdown equation analysis is disabled.",
+        "conditional": "Used when Markdown contains a recognized block equation."
+      },
+      "docx_title": {
+        "inactive": "DOCX smart heading is disabled. Markdown never uses this prompt.",
+        "conditional": "Used for eligible DOCX title windows; never for Markdown."
+      },
+      "extraction_json": {
+        "active": "Entity extraction currently returns JSON, including for Markdown chunks.",
+        "inactive": "Entity extraction currently returns delimiter text."
+      },
+      "extraction_text": {
+        "active": "Entity extraction currently returns delimiter text. This is independent of the Markdown file format.",
+        "inactive": "Entity extraction currently returns JSON. Delimiter text is an output protocol, not a Markdown input format."
+      },
+      "gleaning_json": {
+        "conditional": "Used after JSON extraction unless the token budget skips it.",
+        "inactive": "JSON extraction is off, or gleaning is set to zero."
+      },
+      "gleaning_text": {
+        "conditional": "Used after delimiter-text extraction unless the token budget skips it.",
+        "inactive": "Delimiter-text extraction is off, or gleaning is set to zero."
+      },
+      "description_merge": {
+        "conditional": "Used when entity or relation descriptions require an LLM merge."
+      },
+      "keywords": {
+        "conditional": "Used for graph retrieval unless keywords are supplied or cached."
+      },
+      "graph_answer": {
+        "conditional": "Used for local, global, hybrid and mix answers; context-only skips the answer model."
+      },
+      "naive_answer": {
+        "conditional": "Used for Naive final answers; context-only skips the answer model."
+      }
     }
   },
   "login": {
@@ -220,6 +291,7 @@
         "select": "Select"
       },
       "filters": {
+        "skipped": "Duplicate skipped",
         "all": "All",
         "completed": "Completed",
         "parse": "Parsing",
@@ -228,6 +300,7 @@
         "failed": "Failed"
       },
       "status": {
+        "skipped": "Duplicate skipped",
         "all": "All",
         "completed": "Completed",
         "preprocessed": "Preprocessed",
@@ -528,7 +601,7 @@
       "parametersScopeTooltip": "These parameters are saved in this browser and stay in effect until you change them; queries sent from the /workspace entry opened in it use them too. They are per-browser local state, not a server-wide policy: other browsers and devices are unaffected.",
       "parametersScopeHelpLabel": "About parameter scope",
       "queryMode": "Query Mode",
-      "queryModeTooltip": "Select the retrieval strategy:\n• Naive: Traditional text chunk vector retrieval\n• Local: Focus on entity retrieval\n• Global: Focus on relationship retrieval\n• Hybrid: Local+Global\n• Mix: Local+Global+Naive\n• Bypass: Skip retrieval, send conversation history and current question to LLM",
+      "queryModeTooltip": "Select the retrieval strategy:\n• Naive: Traditional text chunk vector retrieval\n• Local: Focus on entity retrieval\n• Global: Focus on relationship retrieval\n• Hybrid: Local+Global\n• Mix: Local+Global+Naive\n• Graph: Exact entity-root graph traversal\n• Bypass: Skip retrieval, send conversation history and current question to LLM",
       "queryModeWarning": "May reduce retrieval quality",
       "queryModeOptions": {
         "naive": "Naive",
@@ -536,8 +609,12 @@
         "global": "Global",
         "hybrid": "Hybrid",
         "mix": "Mix",
+        "graph": "Graph",
         "bypass": "Bypass"
       },
+      "graphDepth": "Graph Depth",
+      "graphDepthTooltip": "Maximum number of relationship hops from the exact root entity (0-5). Graph mode does not use keyword or vector retrieval.",
+      "graphDepthPlaceholder": "Enter graph depth",
       "responseFormat": "Response Format",
       "responseFormatTooltip": "Defines the response format. Examples:\n• Multiple Paragraphs\n• Single Paragraph\n• Bullet Points",
       "responseFormatOptions": {
@@ -622,6 +699,11 @@
     "quotaDropped": "Browser storage is full: the chat history is no longer being saved. The current conversation stays visible until you leave the page."
   },
   "entityMerge": {
+    "identityDescription": "Check the verified glossary, then verify identity and original evidence with the model. Keep uncertain objects separate.",
+    "identityRules": "Similarity proposes candidates only; conflicting scopes cannot merge; identity requires a verified alias or original evidence.",
+    "identityEnabled": "Enable model identity checks (verified glossary remains active)",
+    "identityHint": "A candidate score does not confirm identity. Settings apply to future writes and do not rewrite the existing graph.",
+    "identityPreview": "Name candidates only; identity and original evidence are checked automatically during ingestion.",
     "button": "Graph ingestion settings",
     "title": "Semantic entity merging",
     "description": "Compares entity name embeddings during graph ingestion. Saved settings apply to future documents.",
@@ -646,5 +728,130 @@
     "merge": "Merge into",
     "exactName": "An exact-name entity already exists",
     "create": "Create a new entity"
+  },
+  "distillation": {
+    "start_prepared": "Start prepared task",
+    "progress_title": "Distillation progress",
+    "submitted": "Distillation task created",
+    "submitting": "Submitting…",
+    "restoring": "Restoring distillation task…",
+    "configuration_pending": "Configure data-work-flow before starting distillation.",
+    "processing": "Workflow is running",
+    "counts": "Read {{seen}} · Accepted {{accepted}} · Rejected {{rejected}} · Processed {{processed}} sources",
+    "unknown": "Unknown",
+    "details": "Task details and logs",
+    "job_id": "Task ID",
+    "load_logs": "Load more logs",
+    "logs": "Distillation logs",
+    "no_logs": "No logs loaded",
+    "log_error": "Unable to load logs. Try again.",
+    "errors": {
+      "connection": "Unable to update distillation status. Reconnecting…",
+      "submit": "Unable to confirm task creation. Retry to recover the same task."
+    },
+    "status": {
+      "preparing": "Preparing input",
+      "ready": "Input prepared; awaiting start",
+      "starting": "Starting workflow",
+      "running": "Distillation running",
+      "completed": "Distillation complete",
+      "completed_with_errors": "Distillation finished with errors",
+      "failed": "Distillation failed",
+      "interrupted": "Distillation interrupted"
+    },
+    "phase": {
+      "scanning": "Reading batch input",
+      "converting": "Preparing workflow input",
+      "starting": "Starting workflow",
+      "processing": "Processing sources"
+    }
+  },
+  "batch": {
+    "title": "Batch retrieval",
+    "step_select": "1. Select core entities",
+    "step_retrieve": "2. Batch retrieval",
+    "step_packages": "3. Evidence packages",
+    "min_neighbors": "Min. related entities",
+    "min_documents": "Min. source documents",
+    "find": "Find candidates",
+    "finding": "Finding…",
+    "candidate_form": "Select core entities",
+    "candidates": "Core entity candidates",
+    "entity": "Entity",
+    "neighbors": "Links",
+    "documents": "Docs",
+    "select_all": "Select all candidates",
+    "select_entity": "Select {{name}}",
+    "no_candidates": "No candidates. Try lower thresholds.",
+    "selection": "Selected {{selected}} / {{total}}",
+    "chosen": "{{count}} centers selected",
+    "reselect": "Choose again",
+    "configure": "Set selected centers and enter retrieval",
+    "graph_depth": "Graph depth",
+    "rag_top_k": "Vector candidate chunks",
+    "start": "Start batch retrieval",
+    "starting": "Starting…",
+    "start_form": "Start batch retrieval",
+    "settings_summary": "Graph depth {{graph_depth}} · {{rag_top_k}} vector candidate chunks",
+    "restoring": "Restoring batch progress…",
+    "progress": "Processed {{processed}} / {{total}} entities",
+    "package_count": "{{count}} packages ready",
+    "package_count_one": "{{count}} package ready",
+    "package_count_other": "{{count}} packages ready",
+    "progress_label": "Batch retrieval progress",
+    "current": "Retrieving and packaging: {{name}} · {{percent}}%",
+    "stop": "Stop",
+    "stopping": "Stopping…",
+    "wait_stop": "Stopping after current requests. Completed results will be retained.",
+    "exceptions": "Failed {{failed}} · No source passages {{empty}}",
+    "item": {
+      "failed": "Retrieval failed",
+      "empty": "No completed source passages"
+    },
+    "submit": "Send batch to distillation",
+    "submitted": "Accepted by distillation",
+    "distillation_pending": "Distillation connection pending",
+    "distillation_unknown": "Distillation connection status unavailable",
+    "status": {
+      "queued": "Waiting",
+      "running": "Working",
+      "completed": "Batch complete",
+      "completed_with_errors": "Batch ended with retrieval failures",
+      "cancelled": "Stopped; complete packages retained",
+      "interrupted": "Interrupted; complete packages retained"
+    },
+    "errors": {
+      "candidates": "Could not find candidates. Check the server and retry.",
+      "start": "Could not start. Check the server and model connections.",
+      "connection": "Unable to update progress. Reconnecting…",
+      "conflict": "Another batch is running. Wait or return to its original window.",
+      "missing": "The previous batch was not found. Start a new batch.",
+      "submit": "Distillation did not confirm receipt. Packages are retained; retry safely.",
+      "config": "Unable to read distillation connection status. Refresh to retry.",
+      "model": "The embedding service is disconnected. Connect the service or SSH tunnel and retry."
+    },
+    "deduplicated": "{{count}} duplicate passages removed across packages; {{skipped}} fully repeated centers skipped",
+    "phase": {
+      "retrieving": "Retrieving: {{done}} / {{total}} centers",
+      "packaging": "Deduplicating and saving: {{done}} / {{total}} centers"
+    },
+    "saved_path": "Saved to: "
+  },
+  "folderUpload": {
+    "choose": "Choose folder",
+    "hint": "Includes subfolders. TXT, Markdown, PDF and Word; up to 20MB per file. Same-named files in different folders stay separate.",
+    "submit": "Import folder",
+    "stop": "Stop remaining uploads",
+    "retry": "Retry failed files",
+    "ready": "Pending",
+    "skipped": "Skipped",
+    "sending": "Uploading",
+    "submitted": "Submitted",
+    "exists": "Already exists",
+    "failed": "Failed",
+    "unsupported": "Unsupported file type",
+    "large": "File exceeds 20MB",
+    "queue": "Submitted files still need parsing and indexing.",
+    "limited": "Showing the first 80 files; all eligible files will be uploaded."
   }
 }

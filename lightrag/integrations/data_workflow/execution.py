@@ -13,21 +13,8 @@ from .config import BridgeSettings, read_yaml
 
 def execute(settings: BridgeSettings, directory: Path) -> dict:
     """Accept completion only when the CLI's receipt agrees with its exit status."""
-    if (
-        not settings.project_directory.is_dir()
-        or not (settings.project_directory / "src/data_studio").is_dir()
-    ):
-        raise ValueError("project_directory must contain src/data_studio")
-    if not settings.python.is_file() or not os.access(settings.python, os.X_OK):
-        raise ValueError("Configure an executable data-work-flow Python interpreter")
     recipe = read_yaml(directory / "job.yaml")
-    for model in recipe.get("models", {}).values():
-        if "example.com" in model.get("api_url", "") or model.get(
-            "model_name", ""
-        ).startswith("replace-with-"):
-            raise ValueError(
-                "Configure real model endpoints and names in workflow_config before starting"
-            )
+    validate_execution(settings, recipe)
     command = [
         str(settings.python),
         "-m",
@@ -103,3 +90,28 @@ def execute(settings: BridgeSettings, directory: Path) -> dict:
     raise RuntimeError(
         f"data-work-flow exited with code {code} without a valid terminal receipt; inspect stderr.log"
     )
+
+
+def validate_execution(settings: BridgeSettings, recipe: dict) -> None:
+    """Check local paths and model placeholders without executing the workflow."""
+    if (
+        not settings.project_directory.is_dir()
+        or not (settings.project_directory / "src/data_studio").is_dir()
+    ):
+        raise ValueError("project_directory must contain src/data_studio")
+    if not settings.python.is_file() or not os.access(settings.python, os.X_OK):
+        raise ValueError("Configure an executable data-work-flow Python interpreter")
+    for model in recipe.get("models", {}).values():
+        if "example.com" in model.get("api_url", "") or model.get(
+            "model_name", ""
+        ).startswith("replace-with-"):
+            raise ValueError(
+                "Configure real model endpoints and names in workflow_config before starting"
+            )
+    if recipe.get("schema_version") != 3:
+        raise ValueError("The workflow recipe must use schema_version: 3")
+    if (
+        settings.credentials_file is not None
+        and not settings.credentials_file.is_file()
+    ):
+        raise ValueError("Configured credentials_file does not exist")

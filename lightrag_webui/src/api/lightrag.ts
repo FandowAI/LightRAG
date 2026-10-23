@@ -175,9 +175,10 @@ export type LightragStatus = {
  * - "global": Utilizes global knowledge.
  * - "hybrid": Combines local and global retrieval methods.
  * - "mix": Integrates knowledge graph and vector retrieval.
+ * - "graph": Traverses the knowledge graph from an exact entity root.
  * - "bypass": Bypasses knowledge retrieval and directly uses the LLM.
  */
-export type QueryMode = 'naive' | 'local' | 'global' | 'hybrid' | 'mix' | 'bypass'
+export type QueryMode = 'naive' | 'local' | 'global' | 'hybrid' | 'mix' | 'graph' | 'bypass'
 
 export type Message = {
   role: 'user' | 'assistant' | 'system'
@@ -203,6 +204,8 @@ export type QueryRequest = {
   stream?: boolean
   /** Number of top items to retrieve. Represents entities in 'local' mode and relationships in 'global' mode. */
   top_k?: number
+  /** Maximum hop depth for exact-root graph traversal mode. */
+  graph_depth?: number
   /** Maximum number of text chunks to retrieve and keep after reranking. */
   chunk_top_k?: number
   /** Maximum number of tokens allocated for entity context in unified token control system. */
@@ -295,6 +298,7 @@ export type DocStatus =
   | 'processing'
   | 'preprocessed'
   | 'processed'
+  | 'skipped'
   | 'failed'
 
 export type DocStatusResponse = {
@@ -670,6 +674,106 @@ export const reprocessFailedDocuments = async (): Promise<ReprocessFailedRespons
   return response.data
 }
 
+export type BatchJob = {
+  id: string
+  status: 'queued' | 'running' | 'completed' | 'completed_with_errors' | 'cancelled' | 'interrupted'
+  total: number
+  processed: number
+  failed: number
+  empty: number
+  package_count: number
+  export_path?: string
+  duplicate_chunks?: number
+  skipped?: number
+  filtered?: number
+  review_pending?: number
+  phase?: 'retrieving' | 'selecting' | 'packaging' | null
+  phase_done?: number
+  phase_total?: number
+  current_center: string | null
+  cancel_requested: boolean
+  settings: { graph_depth: number; rag_top_k: number }
+  items: Array<{ center: string; status: string; packages: number; error_type?: string }>
+  handoff: { status: string; receipt_id?: string }
+}
+
+export const startBatchRetrieval = async (request: { centers: string[]; graph_depth: number; rag_top_k: number }): Promise<BatchJob> =>
+  (await axiosInstance.post('/batch-retrieval/jobs', request, { timeout: 15000 })).data
+export const getBatchRetrieval = async (id: string, signal?: AbortSignal): Promise<BatchJob> =>
+  (await axiosInstance.get(`/batch-retrieval/jobs/${encodeURIComponent(id)}`, { signal, timeout: 15000 })).data
+export const stopBatchRetrieval = async (id: string): Promise<BatchJob> =>
+  (await axiosInstance.post(`/batch-retrieval/jobs/${encodeURIComponent(id)}/stop`, {}, { timeout: 15000 })).data
+
+
+export type EntityCenterCandidate = {
+  name: string
+  entity_type: string
+  tier: 'recommended' | 'review' | 'background' | 'unavailable'
+  neighbor_count: number
+  document_count: number
+  chunk_count: number
+  in_structural_core: boolean
+  reasons: string[]
+  cautions: string[]
+}
+
+export type EntityCenterResult = {
+  policy: { version: string; min_neighbors: number; min_documents: number; evidence_scope: string }
+  summary: { graph_entities: number; supported_relations: number; processed_documents: number; recommended: number; review: number; background: number; unavailable: number }
+  candidates: EntityCenterCandidate[]
+}
+
+export const queryEntityCenters = async (
+  request: { min_neighbors: number; min_documents: number }, signal?: AbortSignal
+): Promise<EntityCenterResult> => {
+  const response = await axiosInstance.post('/query/entity-centers', request, { signal, timeout: 120000 })
+  return response.data
+}
+
+export type EntityPackageRequest = {
+  entity_name: string
+  graph_depth: number
+  rag_top_k: number
+  near_dedup: boolean
+  near_threshold: number
+}
+
+export type EntityPackageResult = {
+  status: string
+  center: string
+  packaging: 'one_center_one_package'
+  summary: {
+    graph_entities: number
+    graph_relations: number
+    vector_candidates: number
+    source_chunks: number
+    packages: number
+    exact_merges: number
+    near_merges: number
+    equivalence_failures: number
+  }
+  packages: Array<{
+    package_id: string
+    tokens: number
+    length_notice: { review_threshold: number; exceeds_review_threshold: boolean; was_truncated: false }
+    entities: Array<{ name: string; depth: number; path: string[] }>
+    text: string
+    distillation_input: Record<string, unknown>
+  }>
+  dedup_audit: Array<Record<string, unknown>>
+}
+
+export const queryEntityPackages = async (
+  request: EntityPackageRequest,
+  signal?: AbortSignal
+): Promise<EntityPackageResult> => {
+  const response = await axiosInstance.post('/query/entity-packages', request, {
+    signal,
+    timeout: 600000
+  })
+  return response.data
+}
+
 export const queryText = async (
   request: QueryRequest,
   signal?: AbortSignal
@@ -1025,10 +1129,12 @@ export const insertTexts = async (texts: string[]): Promise<DocActionResponse> =
 
 export const uploadDocument = async (
   file: File,
-  onUploadProgress?: (percentCompleted: number) => void
+  onUploadProgress?: (percentCompleted: number) => void,
+  relativePath?: string
 ): Promise<DocActionResponse> => {
   const formData = new FormData()
   formData.append('file', file)
+  if (relativePath) formData.append('relative_path', relativePath)
 
   const response = await axiosInstance.post('/documents/upload', formData, {
     headers: {
