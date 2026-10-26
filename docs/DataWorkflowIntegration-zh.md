@@ -6,6 +6,32 @@
 
 ## 配置位置
 
+### 项目目录与 QA 环境
+
+```text
+/root/MasterRAG/
+├── LightRAG/
+│   ├── config/data_workflow.yaml
+│   ├── config/data_workflow_job.yaml
+│   └── runs/data-workflow/
+└── data-work-flow/
+    ├── src/data_studio/
+    ├── uv.lock
+    └── .venv-qa/
+```
+
+两个项目分别维护自己的 Git 仓库和 Python 环境。QA 使用 Python 3.12，按
+`data-work-flow/uv.lock` 安装 `api`、`dataflow` 扩展：
+
+```bash
+cd /root/MasterRAG/data-work-flow
+UV_PROJECT_ENVIRONMENT=.venv-qa uv sync --locked --python 3.12 --extra api --extra dataflow
+.venv-qa/bin/python -m data_studio --help
+```
+
+LightRAG 的任务配置以 `LightRAG/config/` 为相对路径基准；QA 解释器使用
+`/root/MasterRAG/data-work-flow/.venv-qa/bin/python`，不要替换为其符号链接目标。
+
 ### 桥接配置：`config/data_workflow.yaml`
 
 | 字段 | 配置内容 |
@@ -13,10 +39,10 @@
 | `input.paths` | 仅目录提交使用；批次按钮不使用此字段，可保持 `[]`。支持 JSON/JSONL 文件、目录或 glob，目录只扫描一层 |
 | `input.records_path` | 仅目录提交使用；原始接口有额外包装时的字段路径。标准 `/query/data` 保持 `[]` |
 | `workflow_config` | 本次使用的 QA 配方；默认 `data_workflow_job.yaml` |
-| `project_directory` | `data-work-flow` 项目目录，默认 `/root/data-work-flow` |
-| `python` | 该项目的独立虚拟环境解释器；H200 当前使用 `.venv-qa/bin/python`，不替换为符号链接的目标 |
-| `credentials_file` | 凭据专用 `.env` 文件；默认 `null`，使用继承的进程凭据 |
-| `jobs_directory` | 本功能的任务资料目录，默认 `runs/data-workflow`；同一任务生命周期中不要改变此路径 |
+| `project_directory` | `../../data-work-flow`，对应 `/root/MasterRAG/data-work-flow` |
+| `python` | `../../data-work-flow/.venv-qa/bin/python`，保留虚拟环境解释器路径，不替换为符号链接目标 |
+| `credentials_file` | 凭据专用 `.env` 文件；当前为 `/data/lightrag/config/qa.credentials.env`；设为 `null` 时使用继承的进程凭据 |
+| `jobs_directory` | `../runs/data-workflow`，对应 `LightRAG/runs/data-workflow`；同一任务生命周期中不要改变此路径 |
 | `limits.max_active_jobs` | 每个 workspace 的最大活动任务数，默认 1；每个任务内部仍使用配方中的批次及并发限制 |
 | `limits.max_input_bytes` | 一次扫描累计输入字节上限，默认 64 MiB |
 | `limits.max_records` | 一次扫描最大记录数，默认 10000 |
@@ -37,7 +63,7 @@ input:
 
 ### QA 配方：`config/data_workflow_job.yaml`
 
-这份文件复制自 `/root/data-work-flow/examples/config/review_classifition.yaml`，供独立维护，不修改对方项目。启动前填写：
+这份文件复制自 `/root/MasterRAG/data-work-flow/examples/config/review_classifition.yaml`，供独立维护，不修改对方项目。启动前填写：
 
 - `models.generation`：生成及修订模型地址、名称、采样参数、并发等。
 - `models.classifier`：分类模型配置。
@@ -207,9 +233,9 @@ Content-Type: application/json
 幂等、任务恢复、实际 CLI 回执、按钮调用、独立轮询及日志游标。测试使用本地
 模拟 CLI，不调用真实模型。
 
-H200 在 2026-10-23 已按目标项目的 `uv.lock` 安装独立 `.venv-qa`，旧 `.venv-api`
-保持原状。旧环境同时安装的 `dataflow` 与 `open-dataflow` 存在导入目录冲突；新环境
-使用项目锁定的 `open-dataflow==1.0.10`，QA 模块导入和依赖检查通过。
+H200 的 QA 环境位于 `/root/MasterRAG/data-work-flow/.venv-qa`，按目标项目的
+`uv.lock` 安装，使用锁定的 `open-dataflow==1.0.10`。运行环境应通过 QA 模块导入
+及依赖一致性检查。
 凭据仅保存在仓库外的受限文件中，新部署仍需自行提供凭据，不能使用 OpenCode
 的 ChatGPT 账号授权代替模型 API Key。
 

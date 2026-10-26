@@ -6784,9 +6784,13 @@ class _PipelineMixin:
         ``file_path`` is the canonical stored basename. Pending-parse records
         may also carry ``source_file`` with the real uploaded/scanned
         basename, including parser hints.
+
+        An explicit instance input_dir scopes basename lookup to that workspace.
+        Environment and cwd fallbacks apply only when input_dir is unset.
         """
         candidates: list[Path] = []
         roots: list[Path] = []
+        instance_input_dir = getattr(self, "input_dir", None)
 
         def _add_candidate(path_value: Any) -> None:
             raw = str(path_value or "").strip()
@@ -6799,12 +6803,15 @@ class _PipelineMixin:
                 roots.append(path.parent / PARSED_DIR_NAME)
                 candidates.append(path.parent / PARSED_DIR_NAME / path.name)
 
-        _add_candidate(file_path)
+        if not instance_input_dir or Path(file_path).parent != Path("."):
+            _add_candidate(file_path)
 
         p = Path(file_path)
         name = p.name
         source_name = Path(str(source_file or "").strip()).name
-        input_path = input_dir_path()
+        input_path = (
+            Path(instance_input_dir) if instance_input_dir else input_dir_path()
+        )
         # API ``DocumentManager`` scopes its input dir to
         # ``<base_input_dir>/<workspace>/`` (see DocumentManager.__init__);
         # check that location first so files uploaded into a workspace
@@ -6817,32 +6824,34 @@ class _PipelineMixin:
             candidates.append(input_path / workspace / PARSED_DIR_NAME / name)
             roots.append(input_path / workspace)
             roots.append(input_path / workspace / PARSED_DIR_NAME)
-        candidates.append(input_path / name)
-        candidates.append(input_path / PARSED_DIR_NAME / name)
-        roots.append(input_path)
-        roots.append(input_path / PARSED_DIR_NAME)
+        if not instance_input_dir or not workspace:
+            candidates.append(input_path / name)
+            candidates.append(input_path / PARSED_DIR_NAME / name)
+            roots.append(input_path)
+            roots.append(input_path / PARSED_DIR_NAME)
 
         # Common local defaults used by API server.
-        cwd = Path.cwd()
-        if workspace:
-            candidates.append(cwd / "inputs" / workspace / name)
-            candidates.append(cwd / "inputs" / workspace / PARSED_DIR_NAME / name)
-            roots.append(cwd / "inputs" / workspace)
-            roots.append(cwd / "inputs" / workspace / PARSED_DIR_NAME)
-        candidates.extend(
-            [
-                cwd / "inputs" / name,
-                cwd / "inputs" / PARSED_DIR_NAME / name,
-                cwd / PARSED_DIR_NAME / name,
-            ]
-        )
-        roots.extend(
-            [
-                cwd / "inputs",
-                cwd / "inputs" / PARSED_DIR_NAME,
-                cwd / PARSED_DIR_NAME,
-            ]
-        )
+        if not instance_input_dir:
+            cwd = Path.cwd()
+            if workspace:
+                candidates.append(cwd / "inputs" / workspace / name)
+                candidates.append(cwd / "inputs" / workspace / PARSED_DIR_NAME / name)
+                roots.append(cwd / "inputs" / workspace)
+                roots.append(cwd / "inputs" / workspace / PARSED_DIR_NAME)
+            candidates.extend(
+                [
+                    cwd / "inputs" / name,
+                    cwd / "inputs" / PARSED_DIR_NAME / name,
+                    cwd / PARSED_DIR_NAME / name,
+                ]
+            )
+            roots.extend(
+                [
+                    cwd / "inputs",
+                    cwd / "inputs" / PARSED_DIR_NAME,
+                    cwd / PARSED_DIR_NAME,
+                ]
+            )
 
         if source_name:
             candidates = [root / source_name for root in roots] + candidates
@@ -6886,6 +6895,9 @@ class _PipelineMixin:
                         return str(candidate)
             if matches:
                 return str(matches[0])
+        if instance_input_dir:
+            source_root = input_path / workspace if workspace else input_path
+            return str(source_root / (source_name or name))
         return file_path
 
     # ============================================================

@@ -695,6 +695,13 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
     working_dir: str = field(default="./rag_storage")
     """Directory where cache and temporary files are stored."""
 
+    input_dir: str | None = field(default=None, kw_only=True)
+    """Base source directory; workspace subdirectories are resolved beneath it.
+
+    API instances pass their effective CLI input directory. None preserves the
+    SDK's INPUT_DIR and legacy path fallback behavior.
+    """
+
     # Storage
     # ---
 

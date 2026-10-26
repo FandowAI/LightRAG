@@ -764,6 +764,15 @@ Old documents at enqueue time don't yet have the `chunk_options` field; during c
 
 ## 6. Storage and Directory Layout
 
+The API's `--input-dir` is the base directory for both uploads and parser source
+lookup. With a nonempty workspace, sources and their `__parsed__` artifacts live
+under `<input-dir>/<workspace>/`. The server passes this directory into the RAG
+instance; parser basename lookup does not borrow files from another workspace,
+the process's `INPUT_DIR`, or cwd defaults when the instance directory is set.
+SDK callers may set the keyword-only `LightRAG(input_dir=...)` to use the same
+behavior. Leaving it as `None` preserves the SDK's environment and legacy path
+fallbacks. Explicit source paths supplied by SDK callers remain supported.
+
 ### 6.1 `full_docs` Fields
 
 File enqueue and extraction results are written into `full_docs`:

@@ -2524,6 +2524,7 @@ def create_app(args):
         rag = LightRAG(
             **({"chunking_func": selected_chunker} if selected_chunker else {}),
             working_dir=args.working_dir,
+            input_dir=args.input_dir,
             workspace=args.workspace,
             llm_model_func=create_llm_model_func(args.llm_binding),
             llm_model_name=args.llm_model,

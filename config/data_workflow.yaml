@@ -1,9 +1,9 @@
 # Backend-only integration. Paths are relative to this file unless absolute.
 # Override this file location with LIGHTRAG_DATA_WORKFLOW_CONFIG.
 version: 1
-project_directory: /root/data-work-flow
+project_directory: ../../data-work-flow
 # Keep the venv interpreter path; do not substitute its resolved symlink target.
-python: /root/data-work-flow/.venv-qa/bin/python
+python: ../../data-work-flow/.venv-qa/bin/python
 workflow_config: data_workflow_job.yaml
 # Set to a credentials-only .env file, or leave null to use process credentials.
 credentials_file: /data/lightrag/config/qa.credentials.env

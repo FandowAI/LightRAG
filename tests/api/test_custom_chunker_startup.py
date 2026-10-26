@@ -1,6 +1,7 @@
 """Exercise the shared uvicorn/Gunicorn app factory, not just a helper."""
 
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -95,6 +96,21 @@ def test_unset_does_not_override_constructor_default(startup, monkeypatch):
     with pytest.raises(constructed):
         server.create_app(args)
     assert "chunking_func" not in captured[0]
+
+
+@pytest.mark.parametrize("factory", ["create_app", "get_application"])
+def test_cli_input_directory_is_passed_to_rag_without_changing_environment(
+    startup, monkeypatch, factory, tmp_path
+):
+    server, args, captured, constructed = startup
+    original = str(tmp_path / "original-inputs")
+    monkeypatch.setenv("INPUT_DIR", original)
+    monkeypatch.setattr(plugins, "entry_points", lambda **kwargs: [])
+    with pytest.raises(constructed):
+        getattr(server, factory)(args)
+    assert captured[0]["input_dir"] == args.input_dir
+    assert captured[0]["input_dir"] != original
+    assert os.environ["INPUT_DIR"] == original
 
 
 @pytest.mark.parametrize(

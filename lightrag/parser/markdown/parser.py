@@ -1550,11 +1550,8 @@ class NativeMarkdownParser(NativeParserBase):
     empty_content_label = "Markdown"
 
     def validate_source(self, source: Path, file_path: str) -> None:
-        if not (
-            source.exists()
-            and source.is_file()
-            and source.suffix.lower() in (".md", ".textpack")
-        ):
+        super().validate_source(source, file_path)
+        if source.suffix.lower() not in (".md", ".textpack"):
             raise ValueError(
                 f"Native markdown parser does not support pending file: {file_path}"
             )
