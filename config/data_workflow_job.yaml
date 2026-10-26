@@ -30,6 +30,7 @@ models:
 workflow:
   name: review_classifition
   parameters:
+    deduplicate_qa: false
     questions_per_source: 1
     scenario_instructions: 依据原文生成一个采购审批条件缺失的工作情境题，不预设处理后果。
     # max_revision_attempts defaults to 1 only in this workflow; 0 disables revision.
