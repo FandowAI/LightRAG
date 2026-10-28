@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FolderOpenIcon } from 'lucide-react'
 import Button from '@/components/ui/Button'
@@ -15,10 +15,17 @@ interface Props {
   onBusyChange: (busy: boolean) => void
   onAccepted?: () => void
   onComplete?: () => Promise<void>
+  actions?: ReactNode
 }
 const allowed = new Set(['txt', 'md', 'pdf', 'docx'])
 
-export default function FolderUpload({ disabled, onBusyChange, onAccepted, onComplete }: Props) {
+export default function FolderUpload({
+  disabled,
+  onBusyChange,
+  onAccepted,
+  onComplete,
+  actions
+}: Props) {
   const { t } = useTranslation()
   const copy = t('folderUpload', { returnObjects: true }) as Record<string, string>
   const input = useRef<HTMLInputElement>(null)
@@ -68,7 +75,11 @@ export default function FolderUpload({ disabled, onBusyChange, onAccepted, onCom
           accepted = true
         } catch (error) {
           const failure = error as Error & { status?: number }
-          if (failure.status === 409 && /already contains|already exists|identical content/i.test(failure.message)) update('exists')
+          if (
+            failure.status === 409 &&
+            /already contains|already exists|identical content/i.test(failure.message)
+          )
+            update('exists')
           else update('failed', failure.message || String(error))
         }
       }
@@ -109,6 +120,7 @@ export default function FolderUpload({ disabled, onBusyChange, onAccepted, onCom
           <FolderOpenIcon className="size-4" />
           {copy.choose}
         </Button>
+        {actions}
         {rows.length > 0 && (
           <Button
             size="sm"

@@ -19,11 +19,13 @@ from .config import (
     configuration_path,
     load_settings,
     write_job_config,
-    read_yaml,
+    write_config_snapshot,
 )
 from .execution import validate_execution
 from .progress import process_identity, public_job, reconcile
 from .storage import ACTIVE, TERMINAL, JobConflict, JobStore, timestamp
+from .recipe_settings import RecipeSettingsStore, RecipeValues
+from .prompt_files import PromptFiles, validate_prompt, materialize_builtin_prompts
 
 
 class DataWorkflowService:
@@ -48,10 +50,12 @@ class DataWorkflowService:
         return settings, JobStore(root / "jobs.sqlite3"), root
 
     def configuration(self) -> dict:
-        settings, _, _ = self._resources()
+        settings, _, root = self._resources()
         issues = []
         try:
-            validate_execution(settings, read_yaml(settings.workflow_config))
+            validate_execution(
+                settings, RecipeSettingsStore(settings, root).effective()
+            )
         except (ValueError, OSError) as exc:
             issues.append(str(exc))
         return {
@@ -66,6 +70,61 @@ class DataWorkflowService:
             "credentials_file_configured": settings.credentials_file is not None,
             "limits": settings.limits.model_dump(),
         }
+
+    def recipe_settings(self) -> dict:
+        settings, _, root = self._resources()
+        return RecipeSettingsStore(settings, root).get()
+
+    def save_recipe_settings(self, revision: str, values: RecipeValues) -> dict:
+        settings, _, root = self._resources()
+        return RecipeSettingsStore(settings, root).save(revision, values)
+
+    def prompt_files(self, stage: str) -> dict:
+        settings, _, root = self._resources()
+        return PromptFiles(settings, root.name).list(stage)
+
+    def read_prompt(self, stage: str, path: str) -> dict:
+        settings, _, root = self._resources()
+        if not path:
+            selected = RecipeSettingsStore(settings, root).effective()
+            selected["workflow"]["parameters"][stage]["prompt_file"] = None
+            recipe = materialize_builtin_prompts(settings, selected)
+            path = recipe["workflow"]["parameters"][stage]["prompt_file"]
+        return PromptFiles(settings, root.name).read(stage, path)
+
+    def save_prompt(self, stage: str, filename: str, content: str) -> dict:
+        settings, _, root = self._resources()
+        return PromptFiles(settings, root.name).save(stage, filename, content)
+
+    @staticmethod
+    def preview_prompt(stage: str, content: str) -> dict:
+        template, values = validate_prompt(stage, content)
+        return {"preview": template.substitute(values)}
+
+    def retry(self, job_id: str, request_id: str, start: bool = True) -> dict:
+        _, store, _ = self._resources()
+        previous = reconcile(store, store.get(job_id))
+        retry_request = f"retry:{job_id}:{request_id}"
+        existing = store.by_request(retry_request)
+        if existing is not None:
+            if existing.get("retry_of") != job_id:
+                raise JobConflict("Retry request ID belongs to another operation")
+            return self._existing(store, existing, start)
+        if previous["status"] not in {"failed", "interrupted"}:
+            raise JobConflict(
+                "Only failed or interrupted jobs can be explicitly retried"
+            )
+        snapshot = None
+        if previous.get("source", {}).get("type") == "batch":
+            if self.batch_lookup is None:
+                raise ValueError("Batch source lookup is unavailable")
+            snapshot = self.batch_lookup(previous["source"]["batch_id"])
+            if (
+                snapshot.workspace != self.workspace
+                or snapshot.batch_id != previous["source"]["batch_id"]
+            ):
+                raise ValueError("Batch source belongs to another workspace")
+        return self._submit(retry_request, start, snapshot, retry_of=job_id)
 
     def submit_batch(self, batch_id: str, start: bool = True) -> dict:
         if self.batch_lookup is None:
@@ -94,7 +153,12 @@ class DataWorkflowService:
         return self._submit(request_id, start)
 
     def _submit(
-        self, request_id: str, start: bool, snapshot: BatchSnapshot | None = None
+        self,
+        request_id: str,
+        start: bool,
+        snapshot: BatchSnapshot | None = None,
+        *,
+        retry_of: str | None = None,
     ) -> dict:
         settings, store, root = self._resources()
         # Dead workers must not permanently consume the per-workspace run capacity.
@@ -106,6 +170,7 @@ class DataWorkflowService:
             {
                 "job_id": job_id,
                 "request_id": request_id,
+                "retry_of": retry_of,
                 "source": {"type": "batch", "batch_id": snapshot.batch_id}
                 if snapshot
                 else {"type": "directory"},
@@ -128,14 +193,19 @@ class DataWorkflowService:
             directory = Path(record["directory"])
             directory.mkdir(parents=True, exist_ok=False)
             # No credential values are copied. Workers use an explicit credential file.
-            (directory / "settings.json").write_text(
-                settings.model_dump_json(indent=2), encoding="utf-8"
+            write_config_snapshot(
+                settings.workflow_config,
+                directory,
+                "settings.json",
+                settings.model_dump_json(indent=2),
             )
             if snapshot is not None:
                 (directory / "batch-source.json").write_text(
                     snapshot.model_dump_json(indent=2), encoding="utf-8"
                 )
-            write_job_config(settings.workflow_config, directory)
+            recipe = RecipeSettingsStore(settings, root).effective()
+            recipe = materialize_builtin_prompts(settings, recipe)
+            write_job_config(settings.workflow_config, directory, recipe=recipe)
             self._spawn(store, record, "prepare-run" if start else "prepare")
         except Exception as exc:
             store.update(

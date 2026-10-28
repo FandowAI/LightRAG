@@ -25,6 +25,7 @@ import { getSupportedFileTypes, uploadDocument } from '@/api/lightrag'
 import { UploadIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import FolderUpload from '@/components/documents/FolderUpload'
+import ServerDirectoryImport from '@/components/documents/ServerDirectoryImport'
 
 interface UploadDocumentsDialogProps {
   onDocumentsUploaded?: () => Promise<void>
@@ -294,6 +295,14 @@ export default function UploadDocumentsDialog({
           onBusyChange={setIsUploading}
           onAccepted={onUploadBatchAccepted}
           onComplete={onDocumentsUploaded}
+          actions={
+            <ServerDirectoryImport
+              disabled={isUploading || uploaderInputs.disabled}
+              onBusyChange={setIsUploading}
+              onAccepted={onUploadBatchAccepted}
+              onComplete={onDocumentsUploaded}
+            />
+          }
         />
         <FileUploader
           maxFileCount={Infinity}

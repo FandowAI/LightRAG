@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from copy import deepcopy
 from pathlib import Path
 from typing import Literal
 
@@ -11,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_CONFIG = PROJECT_ROOT / "config" / "data_workflow.yaml"
+DEFAULT_CONFIG = PROJECT_ROOT.parent / "config" / "data_workflow.yaml"
 
 
 class StrictModel(BaseModel):
@@ -99,9 +100,11 @@ def load_settings(path: Path) -> BridgeSettings:
     return BridgeSettings.model_validate(document)
 
 
-def write_job_config(template: Path, directory: Path) -> dict:
+def write_job_config(
+    template: Path, directory: Path, *, recipe: dict | None = None
+) -> dict:
     """Snapshot the recipe, preserving the original base for Prompt resources."""
-    document = read_yaml(template)
+    document = read_yaml(template) if recipe is None else deepcopy(recipe)
     if document.get("schema_version") != 3:
         raise ValueError("The data-work-flow recipe must use schema_version: 3")
 
@@ -109,7 +112,7 @@ def write_job_config(template: Path, directory: Path) -> dict:
         if isinstance(value, dict):
             return {
                 key: str((template.parent / Path(item).expanduser()).resolve())
-                if key == "prompt_file" and item is not None
+                if key == "prompt_file" and isinstance(item, str) and item.strip()
                 else rebase(item)
                 for key, item in value.items()
             }
@@ -118,6 +121,24 @@ def write_job_config(template: Path, directory: Path) -> dict:
         return value
 
     document = rebase(document)
+    if document.get("workflow", {}).get("name") == "difficulty_routed_qa":
+        from .prompt_files import publish_text, validate_prompt
+        import hashlib
+
+        snapshot_root = (
+            template.parent / "jobs" / directory.parent.name / directory.name
+        )
+        for stage in ("scenario", "qa", "classification", "inspection"):
+            task = document["workflow"]["parameters"].get(stage, {})
+            if task.get("prompt_file"):
+                content = Path(task["prompt_file"]).read_text(encoding="utf-8")
+                validate_prompt(stage, content)
+                digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+                task["prompt_file"] = str(
+                    publish_text(
+                        snapshot_root / "prompts", f"{stage}-{digest}.md", content
+                    )
+                )
     document["input"] = {"paths": [str(directory / "input.jsonl")]}
     document["output"] = {"directory": str(directory / "outputs")}
     fields = document.setdefault("workflow", {}).setdefault("parameters", {})
@@ -126,7 +147,23 @@ def write_job_config(template: Path, directory: Path) -> dict:
         fields.update(text_path=["text"], meta_path=["meta"])
     else:
         fields.setdefault("fields", {}).update(text_path=["text"], meta_path=["meta"])
-    (directory / "job.yaml").write_text(
-        yaml.safe_dump(document, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    write_config_snapshot(
+        template,
+        directory,
+        "job.yaml",
+        yaml.safe_dump(document, allow_unicode=True, sort_keys=False),
     )
     return document
+
+
+def write_config_snapshot(
+    template: Path, directory: Path, filename: str, content: str
+) -> None:
+    """Keep configuration bytes under config/jobs; job artifact paths remain stable."""
+    from .prompt_files import publish_text
+
+    root = template.parent / "jobs" / directory.parent.name / directory.name
+    target = publish_text(root, filename, content)
+    link = directory / filename
+    if link.absolute() != target.absolute():
+        link.symlink_to(target.resolve())

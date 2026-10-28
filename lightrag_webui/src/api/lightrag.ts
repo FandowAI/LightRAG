@@ -480,7 +480,7 @@ axiosInstance.interceptors.request.use((config) => {
  * error that must not trip its circuit breaker), and a plain Error left them
  * unable to tell a 404 from a network failure.
  */
-export type HttpRequestError = Error & { status?: number }
+export type HttpRequestError = Error & { status?: number; data?: unknown }
 
 export const toHttpRequestError = (
   status: number,
@@ -492,6 +492,7 @@ export const toHttpRequestError = (
     `${status} ${statusText}\n${JSON.stringify(data)}\n${url}`
   ) as HttpRequestError
   error.status = status
+  error.data = data
   return error
 }
 

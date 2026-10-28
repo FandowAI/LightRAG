@@ -104,10 +104,51 @@ async def test_prepare_only_option_and_independent_polling(client):
     service.logs.assert_called_once_with("distill-1", "stderr", 3, 100)
 
 
+async def test_recipe_settings_and_explicit_retry_use_existing_authentication(client):
+    http, service = client
+    service.recipe_settings.return_value = {"revision": "a" * 64, "settings": {}}
+    service.save_recipe_settings.return_value = {"revision": "b" * 64}
+    assert (
+        await http.get("/integrations/data-work-flow/recipe-settings")
+    ).status_code == 200
+    assert (
+        await http.get(
+            "/integrations/data-work-flow/recipe-settings",
+            headers={"X-API-Key": "invalid"},
+        )
+    ).status_code == 403
+    saved = await http.put(
+        "/integrations/data-work-flow/recipe-settings",
+        json={
+            "revision": "a" * 64,
+            "settings": {
+                "questions_per_source": 2,
+            },
+        },
+    )
+    assert saved.status_code == 200
+    assert service.save_recipe_settings.call_args.args[1].questions_per_source == 2
+    invalid = await http.put(
+        "/integrations/data-work-flow/recipe-settings",
+        json={"revision": "a" * 64, "settings": {"models": []}},
+    )
+    assert invalid.status_code == 422
+    service.retry.return_value = service.submit.return_value
+    response = await http.post(
+        "/integrations/data-work-flow/jobs/distill-1/retry",
+        json={"request_id": "retry-click"},
+    )
+    assert response.status_code == 202
+    service.retry.assert_called_once_with("distill-1", "retry-click", True)
+
+
 async def test_all_endpoints_require_authentication(client):
     http, _ = client
     for method, path in [
         ("GET", "/config"),
+        ("GET", "/recipe-settings"),
+        ("PUT", "/recipe-settings"),
+        ("POST", "/jobs/distill-1/retry"),
         ("POST", "/submit"),
         ("GET", "/jobs"),
         ("GET", "/jobs/distill-1"),
@@ -118,7 +159,7 @@ async def test_all_endpoints_require_authentication(client):
             method,
             "/integrations/data-work-flow" + path,
             headers={"X-API-Key": "wrong"},
-            json={} if method == "POST" else None,
+            json={} if method in {"POST", "PUT"} else None,
         )
         assert response.status_code == 403
 
@@ -222,3 +263,67 @@ async def test_batch_source_has_no_arbitrary_path_override(client, source):
         await http.post("/integrations/data-work-flow/submit", json={"source": source})
     ).status_code == 422
     service.submit_batch.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"topics": []},
+        {"fallback_topic": "Other"},
+        {"topic_catalog_file": "/topics.yaml"},
+        {"quality_thresholds": {"grounding": 1}},
+        {"max_revision_attempts": 1},
+        {"expert_parallelism": 2},
+    ],
+)
+async def test_removed_settings_are_rejected(client, settings):
+    http, service = client
+    result = await http.put(
+        "/integrations/data-work-flow/recipe-settings",
+        json={"revision": "a" * 64, "settings": settings},
+    )
+    assert result.status_code == 422
+    service.save_recipe_settings.assert_not_called()
+
+
+async def test_prompt_endpoints_use_authenticated_workspace_service(client):
+    http, service = client
+    service.prompt_files.return_value = {"items": []}
+    service.read_prompt.return_value = {"content": "$payload"}
+    service.save_prompt.return_value = {
+        "path": "/config/prompts/workspace/scenario-hash.md"
+    }
+    service.preview_prompt.return_value = {"preview": "synthetic"}
+    assert (
+        await http.get("/integrations/data-work-flow/prompts?stage=scenario")
+    ).status_code == 200
+    service.prompt_files.assert_called_once_with("scenario")
+    assert (
+        await http.get(
+            "/integrations/data-work-flow/prompts/qa",
+            params={"path": "/config/prompts/qa.md"},
+        )
+    ).status_code == 200
+    service.read_prompt.assert_called_once_with("qa", "/config/prompts/qa.md")
+    document = {"stage": "scenario", "filename": "scenario.md", "content": "$payload"}
+    assert (
+        await http.post("/integrations/data-work-flow/prompts", json=document)
+    ).status_code == 201
+    service.save_prompt.assert_called_once_with("scenario", "scenario.md", "$payload")
+    assert (
+        await http.post("/integrations/data-work-flow/prompts/preview", json=document)
+    ).status_code == 200
+    service.preview_prompt.assert_called_once_with("scenario", "$payload")
+    assert (
+        await http.post(
+            "/integrations/data-work-flow/prompts",
+            json={**document, "stage": "revision"},
+        )
+    ).status_code == 422
+    assert (
+        await http.post(
+            "/integrations/data-work-flow/prompts",
+            json=document,
+            headers={"X-API-Key": "wrong"},
+        )
+    ).status_code == 403

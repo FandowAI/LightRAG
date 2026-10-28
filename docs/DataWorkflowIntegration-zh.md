@@ -10,9 +10,12 @@
 
 ```text
 /root/MasterRAG/
+├── config/
+│   ├── data_workflow.yaml
+│   ├── data_workflow_job.yaml
+│   ├── qa.credentials.env
+│   └── workspaces/<hash>/
 ├── LightRAG/
-│   ├── config/data_workflow.yaml
-│   ├── config/data_workflow_job.yaml
 │   └── runs/data-workflow/
 └── data-work-flow/
     ├── src/data_studio/
@@ -29,7 +32,7 @@ UV_PROJECT_ENVIRONMENT=.venv-qa uv sync --locked --python 3.12 --extra api --ext
 .venv-qa/bin/python -m data_studio --help
 ```
 
-LightRAG 的任务配置以 `LightRAG/config/` 为相对路径基准；QA 解释器使用
+LightRAG 的任务配置以 `/root/MasterRAG/config/` 为相对路径基准；QA 解释器使用
 `/root/MasterRAG/data-work-flow/.venv-qa/bin/python`，不要替换为其符号链接目标。
 
 ### 桥接配置：`config/data_workflow.yaml`
@@ -39,10 +42,10 @@ LightRAG 的任务配置以 `LightRAG/config/` 为相对路径基准；QA 解释
 | `input.paths` | 仅目录提交使用；批次按钮不使用此字段，可保持 `[]`。支持 JSON/JSONL 文件、目录或 glob，目录只扫描一层 |
 | `input.records_path` | 仅目录提交使用；原始接口有额外包装时的字段路径。标准 `/query/data` 保持 `[]` |
 | `workflow_config` | 本次使用的 QA 配方；默认 `data_workflow_job.yaml` |
-| `project_directory` | `../../data-work-flow`，对应 `/root/MasterRAG/data-work-flow` |
-| `python` | `../../data-work-flow/.venv-qa/bin/python`，保留虚拟环境解释器路径，不替换为符号链接目标 |
-| `credentials_file` | 凭据专用 `.env` 文件；当前为 `/data/lightrag/config/qa.credentials.env`；设为 `null` 时使用继承的进程凭据 |
-| `jobs_directory` | `../runs/data-workflow`，对应 `LightRAG/runs/data-workflow`；同一任务生命周期中不要改变此路径 |
+| `project_directory` | `../data-work-flow`，对应 `/root/MasterRAG/data-work-flow` |
+| `python` | `../data-work-flow/.venv-qa/bin/python`，保留虚拟环境解释器路径，不替换为符号链接目标 |
+| `credentials_file` | 凭据专用 `.env` 文件；当前为 `/root/MasterRAG/config/qa.credentials.env`；设为 `null` 时使用继承的进程凭据 |
+| `jobs_directory` | `../LightRAG/runs/data-workflow`，对应 `LightRAG/runs/data-workflow`；同一任务生命周期中不要改变此路径 |
 | `limits.max_active_jobs` | 每个 workspace 的最大活动任务数，默认 1；每个任务内部仍使用配方中的批次及并发限制 |
 | `limits.max_input_bytes` | 一次扫描累计输入字节上限，默认 64 MiB |
 | `limits.max_records` | 一次扫描最大记录数，默认 10000 |
@@ -53,7 +56,7 @@ LightRAG 的任务配置以 `LightRAG/config/` 为相对路径基准；QA 解释
 ```yaml
 input:
   paths:
-    - ../incoming/query-results
+    - ../LightRAG/incoming/query-results
   records_path: []
 ```
 
@@ -61,22 +64,15 @@ input:
 
 配置文件位置可通过进程环境变量 `LIGHTRAG_DATA_WORKFLOW_CONFIG=/绝对路径/bridge.yaml` 覆盖。配置读取是惰性的；未填写输入不会影响原来的 LightRAG 服务启动。
 
-### QA 配方：`config/data_workflow_job.yaml`
+### QA 配方与前端参数设置
 
-这份文件复制自 `/root/MasterRAG/data-work-flow/examples/config/review_classifition.yaml`，供独立维护，不修改对方项目。启动前填写：
+活动配方为 `/root/MasterRAG/config/data_workflow_job.yaml`，适配最新 `difficulty_routed_qa`，默认每来源最多3题、去重关闭。旧专家、评分与循环修订参数已移除。
 
-- `models.generation`：生成及修订模型地址、名称、采样参数、并发等。
-- `models.classifier`：分类模型配置。
-- `models.judge`：专家评价模型配置。
-- `runtime.batch_size`、`runtime.max_inflight_requests`：批次大小及本作业内并发上限。
-- `workflow.parameters`：问题数量、场景要求、分类要求、专家、量表及修订参数。
-- 各任务的 `prompt_file`：需要替换指令时指定 Markdown；相对路径以这份配方文件所在目录为基准。
+前端蒸馏设置提供流程/运行参数、模型档案、阶段/Prompt文件三个标签页。模型字段取自安装的 ModelConfig；四阶段为 scenario、qa、classification、inspection。Prompt 支持上传、预览、在线编辑，正文和配置统一存于 `/root/MasterRAG/config/`，新任务固定配置与模板副本，历史任务不改写。
 
-当前配方的生成、分类和评价角色使用腾讯云 TokenHub 的 `deepseek-v4-flash-0731`，场景要求限定采购审批。部署时按实际模型权限及材料调整；示例占位模型仍会在执行前被拒绝。
+主题在 LightRAG 中不提供操作，下游必填要求按用户决定暂不处理；当前配方缺主题目录，真实运行仍会失败。保存设置不校验主题，也不调用模型。新版示例模型还需要对应腾讯及京东云凭据。
 
-凭据按配方的变量名提供：`QA_API_KEY`、`CLASSIFIER_API_KEY`、`JUDGE_API_KEY`。不将密钥值写入任务配置或 API 返回体。沿用对方 CLI 的规则：已有进程环境变量优先于凭据文件。
-
-每次提交会生成独立的 `job.yaml`，自动替换输入、输出及正文路径映射，保留其他 workflow 参数。不会将原配方的输入文件误用成本次数据。各任务的 `prompt_file` 转为绝对路径，保留配方原来的资源基准。已有任务使用提交时的快照；修改配置后用新的 `request_id` 提交新任务。
+完整字段、存储布局、版本迁移和接口契约见 [蒸馏配置说明](/root/MasterRAG/config/DISTILLATION_CONFIGURATION.md)。旧 review_classifition 的 accepted 筛选与 export-review 不适用于新工作项。
 
 ## 批量检索按钮
 
@@ -204,7 +200,7 @@ Content-Type: application/json
 
 ## 持久化与进程边界
 
-任务按 workspace 隔离。`jobs_directory/<workspace-hash>/jobs.sqlite3` 是任务状态与幂等标识的持久化记录；SQLite 事务控制重复提交与活动任务数量。每个任务有独立目录，保存 `settings.json`、`job.yaml`、`input.jsonl`、`rejected.jsonl`、日志及 `outputs/`。
+任务按 workspace 隔离。`jobs_directory/<workspace-hash>/jobs.sqlite3` 是任务状态与幂等标识的持久化记录；SQLite 事务控制重复提交与活动任务数量。每个任务有独立目录，保存 `settings.json`、`job.yaml` 的配置快照链接及 `input.jsonl`、`rejected.jsonl`、日志及 `outputs/`。
 
 后台 worker 与 HTTP 请求分离，服务正常重启不主动终止已启动的 worker。任务查询会识别已停止的 worker，标记 `interrupted`；不自动重启，保留不确定产物。此本机适配器使用 Linux 进程身份和进程组，需要 API 服务、worker 和目标项目共享本机文件系统；不作为跨主机调度器。
 
@@ -215,6 +211,8 @@ Content-Type: application/json
 ## 代码边界
 
 - `lightrag/integrations/data_workflow/config.py`：配置与配方快照。
+- `recipe_schema.py`、`recipe_settings.py`：最新版可编辑字段探测、校验及工作区覆盖。
+- `prompt_files.py`：受管 Prompt 文本、预览及不可变版本。
 - `inputs.py`：读取目录模式的接口结果文件。
 - `batch_source.py`：定位批次、校验发布产物并规范字段。
 - `conversion.py`：纯字段投影。

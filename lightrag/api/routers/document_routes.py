@@ -7488,4 +7488,15 @@ def create_document_routes(
             logger.error(traceback.format_exc())
             raise internal_server_error(e)
 
+    from lightrag.api.routers.server_import_routes import create_server_import_routes
+
+    router.include_router(
+        create_server_import_routes(
+            doc_manager,
+            upload_to_input_dir,
+            lambda: global_args.max_upload_size,
+            get_managed_background_tasks,
+            api_key,
+        )
+    )
     return router

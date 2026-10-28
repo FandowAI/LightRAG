@@ -1,3 +1,4 @@
+# Reference template. Active deployment settings live in /root/MasterRAG/config/.
 # Backend-only integration. Paths are relative to this file unless absolute.
 # Override this file location with LIGHTRAG_DATA_WORKFLOW_CONFIG.
 version: 1

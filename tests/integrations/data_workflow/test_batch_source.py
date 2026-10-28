@@ -214,6 +214,30 @@ def test_resolver_rejects_missing_manifest_and_wrong_workspace(publication):
         resolve_batch(rag, "batch-1")
 
 
+def test_explicit_batch_retry_restores_latest_association_and_keeps_original(
+    bridge, publication, monkeypatch
+):
+    service = batch_service(bridge, publication)
+    monkeypatch.setattr(service, "_spawn", lambda *args: None)
+    failed = service.submit_batch("batch-1")
+    _, store, _ = service._resources()
+    store.update(failed["job_id"], status="failed", phase="failed")
+    retry = service.retry(failed["job_id"], "same-click", start=False)
+    assert retry["job_id"] != failed["job_id"]
+    assert retry["source"] == {"type": "batch", "batch_id": "batch-1"}
+    assert service.list(1, 0, "batch-1")["items"][0]["job_id"] == retry["job_id"]
+    assert service.get(failed["job_id"])["status"] == "failed"
+    monkeypatch.setattr(
+        service,
+        "batch_lookup",
+        lambda _: (_ for _ in ()).throw(KeyError("publication removed")),
+    )
+    assert (
+        service.retry(failed["job_id"], "same-click", start=False)["job_id"]
+        == retry["job_id"]
+    )
+
+
 def test_symlink_artifacts_cannot_escape_published_directory(publication, tmp_path):
     rag, directory, _, _ = publication
     snapshot = resolve_batch(rag, "batch-1")

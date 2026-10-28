@@ -16,6 +16,7 @@ from lightrag.integrations.data_workflow.contracts import (
 )
 from lightrag.integrations.data_workflow.service import DataWorkflowService
 from lightrag.integrations.data_workflow.storage import JobConflict
+from lightrag.integrations.data_workflow.recipe_settings import RecipeValues
 
 
 class BatchSource(BaseModel):
@@ -41,6 +42,30 @@ class SubmitRequest(BaseModel):
         default=True,
         description="Scan, convert and start the workflow. False only prepares fixed input files.",
     )
+
+
+class RecipeSettingsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+    settings: RecipeValues
+
+
+class PromptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    stage: Literal["scenario", "qa", "classification", "inspection"]
+    content: str = Field(min_length=1, max_length=262144)
+    filename: str = Field(default="prompt.md", min_length=1, max_length=255)
+
+
+class RetryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: str = Field(
+        default_factory=lambda: uuid.uuid4().hex,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+    )
+    start: StrictBool = True
 
 
 def create_data_workflow_routes(
@@ -74,6 +99,37 @@ def create_data_workflow_routes(
     @router.get("/config", dependencies=[Depends(auth)])
     def configuration():
         return invoke(service.configuration)
+
+    @router.get("/recipe-settings", dependencies=[Depends(auth)])
+    def recipe_settings():
+        return invoke(service.recipe_settings)
+
+    @router.put("/recipe-settings", dependencies=[Depends(auth)])
+    def save_recipe_settings(body: RecipeSettingsRequest):
+        return invoke(
+            lambda: service.save_recipe_settings(body.revision, body.settings)
+        )
+
+    @router.get("/prompts", dependencies=[Depends(auth)])
+    def prompt_files(stage: Literal["scenario", "qa", "classification", "inspection"]):
+        return invoke(lambda: service.prompt_files(stage))
+
+    @router.post("/prompts/preview", dependencies=[Depends(auth)])
+    def preview_prompt(body: PromptRequest):
+        return invoke(lambda: service.preview_prompt(body.stage, body.content))
+
+    @router.post("/prompts", status_code=201, dependencies=[Depends(auth)])
+    def save_prompt(body: PromptRequest):
+        return invoke(
+            lambda: service.save_prompt(body.stage, body.filename, body.content)
+        )
+
+    @router.get("/prompts/{stage}", dependencies=[Depends(auth)])
+    def read_prompt(
+        stage: Literal["scenario", "qa", "classification", "inspection"],
+        path: str = Query(default="", max_length=4096),
+    ):
+        return invoke(lambda: service.read_prompt(stage, path))
 
     @router.post(
         "/submit",
@@ -116,6 +172,17 @@ def create_data_workflow_routes(
     )
     def start(job_id: str, request: Request):
         return links(invoke(lambda: service.start(job_id)), request)
+
+    @router.post(
+        "/jobs/{job_id}/retry",
+        status_code=202,
+        response_model=JobResponse,
+        dependencies=[Depends(auth)],
+    )
+    def retry(job_id: str, body: RetryRequest, request: Request):
+        return links(
+            invoke(lambda: service.retry(job_id, body.request_id, body.start)), request
+        )
 
     @router.get(
         "/jobs/{job_id}/logs", response_model=LogResponse, dependencies=[Depends(auth)]
