@@ -58,11 +58,11 @@ class ServerFiles:
     Directory descriptors pin each traversal against parent-symlink swaps.
     """
 
-    def __init__(self):
+    def __init__(self, *, roots: list[str] | None = None):
         self.max_files = configured_limit(FILES_ENV, MAX_FILES, 100_000)
         self.max_entries = configured_limit(ENTRIES_ENV, MAX_ENTRIES, 1_000_000)
         try:
-            values = json.loads(os.getenv(ROOTS_ENV, "[]"))
+            values = json.loads(os.getenv(ROOTS_ENV, "[]")) if roots is None else roots
             if not isinstance(values, list) or any(
                 not isinstance(value, str)
                 or not Path(value).is_absolute()

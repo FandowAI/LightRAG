@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { lazy, Suspense, useState, useCallback, useEffect, useRef, useMemo, useLayoutEffect } from 'react'
 import ThemeProvider from '@/components/ThemeProvider'
 import TabVisibilityProvider from '@/contexts/TabVisibilityProvider'
 import ApiKeyAlert from '@/components/ApiKeyAlert'
@@ -24,9 +24,16 @@ import GraphViewer from '@/features/GraphViewer'
 import DocumentManager from '@/features/DocumentManager'
 import RetrievalView from '@/features/RetrievalView'
 import PromptManager from '@/features/PromptManager'
+import BatchWorkbenchSelector from '@/features/batchSettings/BatchWorkbenchSelector'
+import BatchWorkbenchContent from '@/features/batchSettings/BatchWorkbenchContent'
+import BatchQueryView from '@/features/batchSettings/BatchQueryView'
+import { useBatchContext } from '@/stores/batchContext'
+import { useGraphStore } from '@/stores/graph'
+import { createBatchClient } from '@/api/batchControl'
+import { createRetrievalHistoryStore } from '@/stores/retrievalHistory'
 
 
-import BatchRetrievalView from '@/features/BatchRetrievalView'
+const BatchRetrievalView = lazy(() => import('@/features/BatchRetrievalView'))
 
 import { Tabs, TabsContent } from '@/components/ui/Tabs'
 import ErrorBoundary from '@/components/ErrorBoundary'
@@ -35,12 +42,26 @@ import usePageRestoreGeneration from '@/hooks/usePageRestoreGeneration'
 function App() {
   const message = useBackendState.use.message()
   const enableHealthCheck = useSettingsStore.use.enableHealthCheck()
-  const currentTab = useSettingsStore.use.currentTab()
+  const storedTab = useSettingsStore.use.currentTab()
+  const currentTab = storedTab === 'batch-settings' ? 'documents' : storedTab
+  useEffect(() => { if (storedTab === 'batch-settings') useSettingsStore.getState().setCurrentTab('documents') }, [storedTab])
   const [apiKeyAlertOpen, setApiKeyAlertOpen] = useState(false)
   const [initializing, setInitializing] = useState(true) // Add initializing state
   // Bumped by the cross-tab identity watch: remounting the retrieval view
   // drops the live session state that belonged to the previous identity.
   const identityEpoch = useIdentityEpochStore((s) => s.epoch)
+  const batch = useBatchContext((state) => state.batch)
+  const batchEpoch = useBatchContext((state) => state.epoch)
+  const apiKey = useSettingsStore.use.apiKey()
+  const username = useAuthStore((state) => state.username)
+  const batchClient = useMemo(() => createBatchClient(apiKey), [apiKey])
+  const batchHistory = useMemo(() => batch ? createRetrievalHistoryStore(`lightrag::batch-history::${encodeURIComponent(username ?? 'guest')}::${batch.id}`) : undefined, [batch, username])
+  const viewKey = `${identityEpoch}:${batchEpoch}`
+  const priorApiKey = useRef(apiKey)
+  useEffect(() => {
+    if (priorApiKey.current !== apiKey) { priorApiKey.current = apiKey; useBatchContext.getState().select(null) }
+  }, [apiKey])
+  useLayoutEffect(() => { useGraphStore.getState().reset() }, [batchEpoch])
   const versionCheckRef = useRef(false); // Prevent duplicate calls in Vite dev mode
   const healthCheckInitializedRef = useRef(false); // Prevent duplicate health checks in Vite dev mode
   const pageRestoreGeneration = usePageRestoreGeneration()
@@ -230,32 +251,35 @@ function App() {
               onValueChange={handleTabChange}
             >
               <SiteHeader />
-              <div className="relative grow">
-                <TabsContent value="documents" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
-                  <ErrorBoundary>
-                    <DocumentManager />
-                  </ErrorBoundary>
-                </TabsContent>
-                <TabsContent value="knowledge-graph" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
-                  <ErrorBoundary>
-                    <GraphViewer />
-                  </ErrorBoundary>
-                </TabsContent>
-                <TabsContent value="entity-centers" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
-                  <ErrorBoundary>
-                    <BatchRetrievalView key={identityEpoch} />
-                  </ErrorBoundary>
-                </TabsContent>
-                <TabsContent value="retrieval" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
-                  <ErrorBoundary>
-                    <RetrievalView key={identityEpoch} />
-                  </ErrorBoundary>
-                </TabsContent>
-                <TabsContent value="prompts" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
-                  <ErrorBoundary>
-                    <PromptManager />
-                  </ErrorBoundary>
-                </TabsContent>
+              <BatchWorkbenchSelector key={identityEpoch} client={batchClient} />
+              <div key={viewKey} className="relative grow">
+                <BatchWorkbenchContent batch={batch} client={batchClient}>
+                  <TabsContent value="documents" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
+                    <ErrorBoundary>
+                      <DocumentManager />
+                    </ErrorBoundary>
+                  </TabsContent>
+                  <TabsContent value="knowledge-graph" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
+                    <ErrorBoundary>
+                      <GraphViewer />
+                    </ErrorBoundary>
+                  </TabsContent>
+                  <TabsContent value="entity-centers" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
+                    <ErrorBoundary>
+                      <Suspense fallback={<div role="status" className="p-4">…</div>}><BatchRetrievalView key={viewKey} /></Suspense>
+                    </ErrorBoundary>
+                  </TabsContent>
+                  <TabsContent value="retrieval" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
+                    <ErrorBoundary>
+                      {batch && batchHistory ? <BatchQueryView key={viewKey} client={batchClient} batch={batch.id} identity={username ?? 'guest'} historyStore={batchHistory} active={currentTab === 'retrieval'} /> : <RetrievalView key={viewKey} />}
+                    </ErrorBoundary>
+                  </TabsContent>
+                  <TabsContent value="prompts" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
+                    <ErrorBoundary>
+                      <PromptManager />
+                    </ErrorBoundary>
+                  </TabsContent>
+                </BatchWorkbenchContent>
               </div>
             </Tabs>
             {enableHealthCheck && <StatusIndicator />}

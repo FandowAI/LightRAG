@@ -2,12 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { getBatchRetrieval, startBatchRetrieval, stopBatchRetrieval, type BatchJob } from '@/api/lightrag'
 import { backendBaseUrl } from '@/lib/constants'
 import { useAuthStore } from '@/stores/state'
+import { useBatchContext } from '@/stores/batchContext'
 
 export const batchIsActive = (job: BatchJob | null) => !!job && ['queued', 'running'].includes(job.status)
 
 export function useBatchRetrieval() {
   const username = useAuthStore(state => state.username) || 'guest'
-  const storageKey = `lightrag-batch:${backendBaseUrl}:${username}`
+  const batch = useBatchContext(state => state.batch?.id)
+  const storageKey = `lightrag-batch:${backendBaseUrl}:${username}${batch ? `:${batch}` : ''}`
   const [jobId, setJobId] = useState<string | null>(() => {
     try { return sessionStorage.getItem(storageKey) } catch { return null }
   })

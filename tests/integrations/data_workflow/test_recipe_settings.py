@@ -19,6 +19,8 @@ pytestmark = pytest.mark.offline
 @pytest.fixture
 def classified(bridge, monkeypatch):
     service, config, _, recipe = bridge
+    catalog = recipe.parent / "categories.yaml"
+    catalog.write_text("categories:\n  - id: operations\n")
     document = read_yaml(recipe)
     document["workflow"] = {
         "name": "difficulty_routed_qa",
@@ -26,7 +28,7 @@ def classified(bridge, monkeypatch):
             "questions_per_source": 1,
             "scenario_instructions": "Synthetic scenario",
             "classification_instructions": "Classify importance and difficulty",
-            "topic_catalog_file": "/administrator-owned/missing.yaml",
+            "topic_catalog_file": str(catalog),
             **{
                 stage: {"model": "generator", "prompt": prompt, "parser": parser}
                 for stage, prompt, parser in (
@@ -102,14 +104,20 @@ def test_save_keeps_uneditable_recipe_values_and_does_not_generate_resources(
     )
 
 
-def test_other_parameters_save_without_workflow_resources(classified):
-    service, _, recipe, _ = classified
+def test_missing_catalog_validation_prevents_saving_settings(classified):
+    service, _, recipe, probe = classified
     document = read_yaml(recipe)
     del document["workflow"]["parameters"]["topic_catalog_file"]
     recipe.write_text(yaml.safe_dump(document))
     snapshot = service.recipe_settings()
-    saved = service.save_recipe_settings(snapshot["revision"], values(snapshot))
-    assert saved["settings"]["questions_per_source"] == 3
+    probe.side_effect = lambda settings, operation, recipe=None: (
+        {"schema_version": 3, "defaults": {}}
+        if operation == "describe"
+        else {"valid": False, "issues": ["topic_catalog_file: Field required"]}
+    )
+    with pytest.raises(ValueError, match="topic_catalog_file"):
+        service.save_recipe_settings(snapshot["revision"], values(snapshot))
+    assert not Path(snapshot["settings_file"]).exists()
 
 
 def test_revision_conflicts_and_failed_validation_do_not_overwrite(classified):
@@ -183,36 +191,62 @@ def test_explicit_retry_keeps_failure_and_is_idempotent(classified, monkeypatch)
         service.retry(retried["job_id"], "invalid-retry")
 
 
-def test_legacy_settings_cannot_override_new_workflow_defaults(classified):
-    service, _, recipe, _ = classified
-    before = service.recipe_settings()
-    path = Path(before["settings_file"])
+@pytest.mark.parametrize("version", [2, 3])
+def test_old_settings_formats_are_rejected(classified, version):
+    service, _, _, _ = classified
+    snapshot = service.recipe_settings()
+    path = Path(snapshot["settings_file"])
     path.write_text(
         json.dumps(
             {
-                "schema_version": 2,
-                "topic_catalog_file": "/removed/generated.yaml",
-                "values": {
-                    **before["settings"],
-                    "questions_per_source": 7,
-                    "deduplicate_qa": True,
-                    "max_revision_attempts": 3,
-                    "expert_parallelism": 4,
-                    "topics": [],
-                    "fallback_topic": "Other",
-                    "quality_thresholds": {"grounding": 1},
-                },
+                "schema_version": version,
+                "workflow_name": "difficulty_routed_qa",
+                "values": snapshot["settings"],
             }
         )
     )
+    with pytest.raises(ValueError, match="Unsupported recipe settings version"):
+        service.recipe_settings()
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_removed_deduplication_field_is_rejected(enabled):
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        RecipeValues.model_validate({"deduplicate_qa": enabled})
+
+
+def test_current_workspace_settings_reject_removed_fields(classified):
+    service, _, _, _ = classified
     snapshot = service.recipe_settings()
-    assert snapshot["settings"]["questions_per_source"] == 1
-    assert snapshot["settings"]["deduplicate_qa"] is False
-    assert "max_revision_attempts" not in snapshot["settings"]
-    assert "expert_parallelism" not in snapshot["settings"]
-    assert set(snapshot["settings"]) == set(RecipeValues.model_fields)
-    service.save_recipe_settings(
-        snapshot["revision"], RecipeValues.model_validate(snapshot["settings"])
+    path = Path(snapshot["settings_file"])
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 4,
+                "workflow_name": "difficulty_routed_qa",
+                "values": {**snapshot["settings"], "deduplicate_qa": False},
+            }
+        )
     )
-    assert json.loads(path.read_text())["schema_version"] == 4
-    assert "quality" not in read_yaml(recipe)["workflow"]["parameters"]
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        service.recipe_settings()
+
+
+def test_managed_recipe_defaults_remain_editable_and_survive_revision_paths(
+    classified, tmp_path
+):
+    service, _, recipe, _ = classified
+    before = recipe.read_bytes()
+    service.config_root = tmp_path / "batch-business"
+    first = service.recipe_settings()
+    assert first["editable"]
+    assert all(
+        Path(v["prompt_file"]).is_relative_to(service.config_root)
+        for v in first["settings"]["stages"].values()
+    )
+    saved = service.save_recipe_settings(first["revision"], values(first))
+    assert saved["settings"]["questions_per_source"] == 3
+    stage = saved["settings"]["stages"]["scenario"]["prompt_file"]
+    assert service.read_prompt("scenario", stage)["content"] == "$payload"
+    assert recipe.read_bytes() == before
+    assert service.recipe_settings()["settings"]["questions_per_source"] == 3

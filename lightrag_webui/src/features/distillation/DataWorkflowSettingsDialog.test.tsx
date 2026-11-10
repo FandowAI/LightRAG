@@ -35,6 +35,7 @@ test('shows only supported parameters and saves them without topic or score inpu
   expect(screen.queryAllByLabelText(/Topic name|Fallback topic/)).toHaveLength(0)
   expect(screen.queryAllByText('Minimum passing scores by dimension')).toHaveLength(0)
   expect(screen.queryAllByLabelText(/Maximum revisions|Concurrent expert/)).toHaveLength(0)
+  expect(screen.queryAllByLabelText(/Deduplicate QAs/)).toHaveLength(0)
   expect(screen.getAllByLabelText(/Inspection instructions/)).toHaveLength(1)
   expect(saveDisabled()).toBe(false)
   fireEvent.change(screen.getByLabelText('Maximum questions per source (questions_per_source)'), {

@@ -3490,6 +3490,7 @@ async def commit_manual_retry_request(
     ingress,
     request_id: str,
     state: Dict[str, Any],
+    retry_doc_ids: tuple[str, ...] | None = None,
 ) -> Optional[str]:
     """Fence recheck + sticky manual-retry publish in ONE critical section.
 
@@ -3512,7 +3513,10 @@ async def commit_manual_retry_request(
     Returns ``None`` on success, or the human-readable refusal message.
     """
     message = PipelineIngressMessage(
-        kind="rescan", retry_failed=True, request_id=request_id
+        kind="rescan",
+        retry_failed=True,
+        request_id=request_id,
+        retry_doc_ids=retry_doc_ids,
     )
     async with pipeline_status_lock:
         snapshot, recovery_updates = _prepare_pipeline_reservation_decision(

@@ -7,7 +7,7 @@ import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react
 import { renderWithProviders } from '@/test/render'
 import en from '@/locales/en.json'
 import QuerySettings from './QuerySettings'
-import { defaultQuerySettings, useQuerySettingsStore } from '@/stores/querySettings'
+import { createQuerySettingsStore, defaultQuerySettings, useQuerySettingsStore } from '@/stores/querySettings'
 
 /**
  * The parameters edited in this panel are per-browser local state that the
@@ -19,6 +19,39 @@ import { defaultQuerySettings, useQuerySettingsStore } from '@/stores/querySetti
  * including by TAP: a device with no hover has nothing else to open it with.
  */
 const strings = en.retrievePanel.querySettings
+
+test('batch query parameters and prompt histories persist independently of other batches and the original workspace', () => {
+  const aKey = 'test::batch-query-settings::alice::a'
+  const bKey = 'test::batch-query-settings::alice::b'
+  const anotherUserKey = 'test::batch-query-settings::bob::a'
+  const original = { ...useQuerySettingsStore.getState().querySettings }
+  try {
+    const a = createQuerySettingsStore(aKey)
+    const b = createQuerySettingsStore(bKey)
+    const anotherUser = createQuerySettingsStore(anotherUserKey)
+    const panel = renderWithProviders(<QuerySettings store={a} />)
+    expect(screen.getAllByText(en.batchWorkbench.queryScope)).toHaveLength(1)
+    fireEvent.change(screen.getByRole('spinbutton', { name: strings.topK }), { target: { value: '87' } })
+    expect(a.getState().querySettings.top_k).toBe(87)
+    expect(b.getState().querySettings.top_k).toBe(40)
+    expect(anotherUser.getState().querySettings.top_k).toBe(40)
+    expect(useQuerySettingsStore.getState().querySettings).toEqual(original)
+    a.getState().addUserPromptToHistory('Batch A prompt')
+    expect(b.getState().userPromptHistory).toEqual([])
+    expect(anotherUser.getState().userPromptHistory).toEqual([])
+    const restored = createQuerySettingsStore(aKey)
+    expect(restored.getState().querySettings.top_k).toBe(87)
+    expect(restored.getState().userPromptHistory).toEqual(['Batch A prompt'])
+    panel.rerender(<QuerySettings store={b} />)
+    expect((screen.getByRole('spinbutton', { name: strings.topK }) as HTMLInputElement).value).toBe('40')
+    fireEvent.change(screen.getByRole('spinbutton', { name: strings.topK }), { target: { value: '23' } })
+    expect(b.getState().querySettings.top_k).toBe(23)
+    expect(a.getState().querySettings.top_k).toBe(87)
+  } finally {
+    cleanup()
+    for (const key of [aKey, bKey, anotherUserKey]) localStorage.removeItem(key)
+  }
+})
 
 describe('structured context option', () => {
   afterEach(() => {

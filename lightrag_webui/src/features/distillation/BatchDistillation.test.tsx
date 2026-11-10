@@ -1,9 +1,11 @@
-import { afterEach, expect, mock, spyOn, test } from 'bun:test'
+import { beforeEach, afterEach, expect, mock, spyOn, test } from 'bun:test'
 import { cleanup, fireEvent, waitFor } from '@testing-library/react'
 import * as api from '@/api/dataWorkflow'
 import { renderWithProviders } from '@/test/render'
 import { recipeSettingsFixture, workflowFixture } from '@/test/dataWorkflow'
 import BatchDistillation from './BatchDistillation'
+
+beforeEach(() => { spyOn(api, 'getWorkflowLogs').mockResolvedValue({ text: '', offset: 0, next_offset: 0, has_more: false }) })
 
 afterEach(() => {
   cleanup()
@@ -64,10 +66,6 @@ test('loads logs using the backend byte cursor and displays an execution error',
   await waitFor(() =>
     expect(view.getByRole('alert').textContent).toContain('Model configuration invalid')
   )
-  fireEvent.click(view.getByText('Task details and logs'))
-  fireEvent.click(view.getByRole('button', { name: 'Load more logs' }))
-  await waitFor(() => expect(view.getByLabelText('Distillation logs').textContent).toBe('first'))
-  fireEvent.click(view.getByRole('button', { name: 'Load more logs' }))
   await waitFor(() =>
     expect(view.getByLabelText('Distillation logs').textContent).toBe('first second')
   )

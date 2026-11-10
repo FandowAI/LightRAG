@@ -39,17 +39,16 @@ class RecipeValues(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
     questions_per_source: int = Field(default=3, gt=0)
-    deduplicate_qa: bool = False
     scenario_instructions: str = Field(
         default="生成有来源依据的企业工作问题场景。", min_length=1, max_length=16000
     )
     classification_instructions: str = Field(
-        default="分别判断业务重要性和核实难度，并从给定目录选择一个主题。",
+        default="根据 categories 目录判断业务重要性和核实难度，原样输出唯一类别 id。",
         min_length=1,
         max_length=16000,
     )
     inspection_instructions: str = Field(
-        default="依据原文检查原始问答；有可靠依据时修正问题或答案，不能可靠修正时保留原文并说明原因。",
+        default="依据原文检查原始问答；高重要性保留原问答并给出具体人工建议，低重要性有可靠依据时可修订，否则保留原问答并说明原因。",
         min_length=1,
         max_length=16000,
     )
@@ -80,9 +79,14 @@ def apply_values(recipe: dict, values: RecipeValues) -> dict:
 class RecipeSettingsStore:
     """Keep defaults in YAML and workspace changes in a separate versioned file."""
 
-    def __init__(self, settings: BridgeSettings, root: Path):
+    def __init__(
+        self, settings: BridgeSettings, root: Path, *, config_root: Path | None = None
+    ):
         self.settings = settings
-        self.root = settings.workflow_config.parent / "workspaces" / root.name
+        self.config_root = (
+            config_root if config_root is not None else settings.workflow_config.parent
+        )
+        self.root = self.config_root / "workspaces" / root.name
         self.path = self.root / "recipe-settings.json"
 
     @contextmanager
@@ -104,17 +108,10 @@ class RecipeSettingsStore:
         if overrides:
             saved = json.loads(overrides)
             version = saved.get("schema_version")
-            if version not in {2, 3, 4}:
+            if version != 4 or saved.get("workflow_name") != WORKFLOW:
                 raise ValueError("Unsupported recipe settings version")
             values = saved["values"]
             if recipe.get("workflow", {}).get("name") == WORKFLOW:
-                if version < 4:
-                    # Old workflow-only controls and defaults must not enter the new recipe.
-                    values = {
-                        name: value
-                        for name, value in values.items()
-                        if name in RUNTIME_FIELDS
-                    }
                 defaults = self._values(recipe)
                 recipe = apply_values(
                     recipe, RecipeValues.model_validate({**defaults, **values})
@@ -187,7 +184,9 @@ class RecipeSettingsStore:
                 raise ValueError("All four workflow stages must be configured")
             from .prompt_files import PromptFiles
 
-            prompts = PromptFiles(self.settings, self.root.name)
+            prompts = PromptFiles(
+                self.settings, self.root.name, config_root=self.config_root
+            )
             for name, task in values.stages.items():
                 if task.prompt_file:
                     prompts.read(name, task.prompt_file)

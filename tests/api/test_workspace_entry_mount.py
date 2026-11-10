@@ -62,7 +62,14 @@ class _FakeLightRAG:
     """Minimal stand-in implementing the async surface /health touches."""
 
     def __init__(self, *_args, **_kwargs):
-        pass
+        self.__dict__.update(_kwargs)
+        self.user_prompt_prefix = ""
+
+    def _refresh_addon_params_cache(self):
+        return None
+
+    def set_role_llm_metadata(self, _role, **_metadata):
+        return None
 
     def register_role_llm_builder(self, _builder):
         return None
@@ -117,6 +124,10 @@ def _build_app(tmp_path, monkeypatch, *cli_args):
         args = parse_args()
     finally:
         sys.argv = original_argv
+    args.graph_storage = "NetworkXStorage"
+    args.vector_storage = "NanoVectorDBStorage"
+    args.working_dir = str(tmp_path / "storage")
+    args.input_dir = str(tmp_path / "inputs")
     initialize_config(args, force=True)
 
     # Import AFTER initialize_config: module-level code in the server's

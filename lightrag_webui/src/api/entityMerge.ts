@@ -28,17 +28,19 @@ export type EntityMergePreview = {
   target: string | null
 }
 
-export const getEntityMergeSettings = async (): Promise<EntityMergeSnapshot> =>
-  (await lightragAxios.get<EntityMergeSnapshot>('/entity-merge')).data
+export const getEntityMergeSettings = async (signal?: AbortSignal): Promise<EntityMergeSnapshot> =>
+  (await lightragAxios.get<EntityMergeSnapshot>('/entity-merge', { signal })).data
 
 export const saveEntityMergeSettings = async (
   revision: number,
-  settings: EntityMergeSettings
+  settings: EntityMergeSettings,
+  signal?: AbortSignal
 ): Promise<EntityMergeSnapshot> =>
-  (await lightragAxios.put<EntityMergeSnapshot>('/entity-merge', { revision, settings })).data
+  (await lightragAxios.put<EntityMergeSnapshot>('/entity-merge', { revision, settings }, { signal })).data
 
 export const previewEntityMerge = async (
   name: string,
-  entity_type: string
+  entity_type: string,
+  signal?: AbortSignal
 ): Promise<EntityMergePreview> =>
-  (await lightragAxios.post<EntityMergePreview>('/entity-merge/preview', { name, entity_type })).data
+  (await lightragAxios.post<EntityMergePreview>('/entity-merge/preview', { name, entity_type }, { signal })).data

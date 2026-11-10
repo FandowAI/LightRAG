@@ -9,7 +9,7 @@ export default function RecipeModelSettings({
   values,
   onChange
 }: {
-  snapshot: RecipeSettingsSnapshot
+  snapshot: Pick<RecipeSettingsSnapshot, 'model_schema'>
   values: RecipeValues
   onChange: (values: RecipeValues) => void
 }) {

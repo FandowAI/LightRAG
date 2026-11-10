@@ -28,11 +28,11 @@ def _read(path: Path, maximum: int) -> bytes:
     return raw
 
 
-def resolve_batch(rag, batch_id: str) -> BatchSnapshot:
+def resolve_batch(rag, batch_id: str, *, root: Path | None = None) -> BatchSnapshot:
     """Resolve only a completed batch owned by the initialized RAG workspace."""
     from lightrag.batch_retrieval import BatchManager
 
-    manager = BatchManager(rag)
+    manager = BatchManager(rag, root=root)
     job = manager.get(batch_id)
     if job["status"] not in {"completed", "completed_with_errors"}:
         raise JobConflict("Wait for batch retrieval to finish before distillation")

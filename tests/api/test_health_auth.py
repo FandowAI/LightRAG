@@ -42,7 +42,7 @@ _ENV_VARS_TO_ISOLATE = (
 
 
 @pytest.fixture(autouse=True)
-def _isolate_env(monkeypatch):
+def _isolate_env(monkeypatch, tmp_path):
     """Keep tests hermetic from developer-local .env and global config state."""
     for var in _ENV_VARS_TO_ISOLATE:
         monkeypatch.delenv(var, raising=False)
@@ -56,6 +56,10 @@ def _isolate_env(monkeypatch):
     # refusing to start without a named embedding model. The ollama
     # binding's own default, so no EMBEDDING_DIM is implied.
     monkeypatch.setenv("EMBEDDING_MODEL", "bge-m3:latest")
+    monkeypatch.setenv("LIGHTRAG_GRAPH_STORAGE", "NetworkXStorage")
+    monkeypatch.setenv("LIGHTRAG_VECTOR_STORAGE", "NanoVectorDBStorage")
+    monkeypatch.setenv("WORKING_DIR", str(tmp_path / "storage"))
+    monkeypatch.setenv("INPUT_DIR", str(tmp_path / "inputs"))
 
     import lightrag.api.config as config
 
@@ -70,7 +74,11 @@ class _FakeLightRAG:
     """Minimal stand-in implementing the async surface /health touches."""
 
     def __init__(self, *_args, **_kwargs):
-        pass
+        self.__dict__.update(_kwargs)
+        self.user_prompt_prefix = ""
+
+    def _refresh_addon_params_cache(self):
+        return None
 
     def register_role_llm_builder(self, _builder):
         return None

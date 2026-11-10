@@ -298,19 +298,6 @@ class GraphQueryBatchRequest(BaseModel):
         le=5,
         description="Maximum hop depth for each exact-root graph traversal.",
     )
-    deduplicate_relations: bool = Field(
-        default=True,
-        description=(
-            "Prune traversal branches that enter entity roots processed earlier "
-            "in this request. Other branches remain available even when their "
-            "relationships appeared in an earlier result."
-        ),
-    )
-    deduplicate_chunks_in_batch: bool = Field(
-        default=False,
-        description="Remove chunks already returned earlier in this request.",
-    )
-
     @field_validator("entities", mode="after")
     @classmethod
     def validate_entities(cls, entities: List[str]) -> List[str]:
@@ -1654,8 +1641,6 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             return await rag.aquery_data_batch(
                 request.entities,
                 param=request.to_query_params(),
-                deduplicate_relations=request.deduplicate_relations,
-                deduplicate_chunks_in_batch=request.deduplicate_chunks_in_batch,
             )
         except Exception as e:
             logger.error(f"Error processing batch graph query: {str(e)}", exc_info=True)

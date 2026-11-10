@@ -1,5 +1,6 @@
 import json
 import sys
+from pathlib import Path
 
 import pytest
 import yaml
@@ -45,6 +46,28 @@ def test_snapshot_rebases_prompt_files_and_owns_input_mapping(bridge, tmp_path):
     assert params["scenario"]["prompt_file"] == str(tmp_path / "prompts/scenario.md")
     assert params["fields"]["text_path"] == ["text"]
     assert read_yaml(recipe) == doc
+
+
+def test_current_catalog_is_snapshotted_before_later_edits(bridge, tmp_path):
+    _, _, _, recipe = bridge
+    catalog = tmp_path / "topics/categories.yaml"
+    catalog.parent.mkdir()
+    original = "categories:\n  - id: original\n"
+    catalog.write_text(original)
+    document = read_yaml(recipe)
+    document["workflow"] = {
+        "name": "difficulty_routed_qa",
+        "parameters": {"topic_catalog_file": "topics/categories.yaml"},
+    }
+    recipe.write_text(yaml.safe_dump(document))
+    output = tmp_path / "prepared"
+    output.mkdir()
+    snapshot = write_job_config(recipe, output)
+    saved = Path(snapshot["workflow"]["parameters"]["topic_catalog_file"])
+    catalog.write_text("categories: []\n")
+    assert saved != catalog
+    assert saved.read_text() == original
+    assert read_yaml(recipe) == document
 
 
 def test_json_array_and_wrapper_path(bridge, query_result):

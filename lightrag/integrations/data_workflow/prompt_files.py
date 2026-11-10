@@ -62,8 +62,16 @@ def validate_prompt(stage: str, content: str) -> tuple[Template, dict]:
 
 
 class PromptFiles:
-    def __init__(self, settings: BridgeSettings, namespace: str):
-        self.base = settings.workflow_config.parent / "prompts"
+    def __init__(
+        self,
+        settings: BridgeSettings,
+        namespace: str,
+        *,
+        config_root: Path | None = None,
+    ):
+        self.base = (
+            config_root if config_root is not None else settings.workflow_config.parent
+        ) / "prompts"
         self.root = self.base / namespace
         self.defaults = self.base / "defaults"
 
@@ -122,7 +130,9 @@ class PromptFiles:
         return self.read(stage, str(path))
 
 
-def materialize_builtin_prompts(settings: BridgeSettings, recipe: dict) -> dict:
+def materialize_builtin_prompts(
+    settings: BridgeSettings, recipe: dict, *, config_root: Path | None = None
+) -> dict:
     """Resolve selected built-ins now, so queued tasks do not read later source edits."""
     if recipe.get("workflow", {}).get("name") != WORKFLOW:
         return recipe
@@ -142,7 +152,12 @@ def materialize_builtin_prompts(settings: BridgeSettings, recipe: dict) -> dict:
         validate_prompt(name, content)
         digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
         path = publish_text(
-            settings.workflow_config.parent / "prompts/defaults",
+            (
+                config_root
+                if config_root is not None
+                else settings.workflow_config.parent
+            )
+            / "prompts/defaults",
             f"{name}-{digest}.md",
             content,
         )

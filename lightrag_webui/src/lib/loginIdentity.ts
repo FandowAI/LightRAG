@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useBatchContext } from '@/stores/batchContext'
 import { useWebuiRetrievalHistoryStore } from '@/stores/webuiRetrievalHistory'
 import { useWorkspaceRetrievalHistoryStore } from '@/stores/workspaceRetrievalHistory'
 import { initAuthState, useAuthStore } from '@/stores/state'
@@ -125,6 +126,7 @@ export function applyLoginIdentity(identity: string): boolean {
     }
     useWebuiRetrievalHistoryStore.getState().clearHistory()
     useWorkspaceRetrievalHistoryStore.getState().clearHistory()
+    useBatchContext.getState().select(null)
   }
 
   try {
@@ -206,6 +208,7 @@ export function handleIdentityStorageEvent(event: {
   useWebuiRetrievalHistoryStore.getState().clearHistory()
   useWorkspaceRetrievalHistoryStore.getState().clearHistory()
   useIdentityEpochStore.setState((state) => ({ epoch: state.epoch + 1 }))
+  useBatchContext.getState().select(null)
 }
 
 /** Installed by BOTH entry bootstraps alongside their other listeners. */

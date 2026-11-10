@@ -1,7 +1,10 @@
 """Authenticated batch evidence jobs; ordinary query routes stay unchanged."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
+from pathlib import Path
+
+from lightrag.batch_preview import preview_packages
 from pydantic import BaseModel, Field, field_validator
 
 from lightrag.api.utils_api import get_combined_auth_dependency
@@ -11,7 +14,7 @@ from lightrag.entity_packages import PackageSettings
 
 class BatchRequest(BaseModel):
     model_config = {"extra": "forbid"}
-    centers: list[str] = Field(min_length=1, max_length=500)
+    centers: list[str] = Field(min_length=1)
     graph_depth: int = Field(default=2, ge=0, le=5)
     rag_top_k: int = Field(default=10, ge=1, le=100)
 
@@ -108,6 +111,22 @@ def create_batch_routes(rag, api_key=None):
             else "application/x-ndjson",
             filename=filename,
         )
+
+    @router.get("/batch-retrieval/jobs/{job_id}/preview")
+    async def preview(
+        job_id: str, offset: int = Query(0, ge=0), limit: int = Query(10, ge=1, le=20)
+    ):
+        published = artifact(job_id, "packages.jsonl")
+        try:
+            return preview_packages(
+                Path(published.path),
+                job_id,
+                getattr(rag, "workspace", ""),
+                offset,
+                limit,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @router.get("/batch-retrieval/jobs/{job_id}/packages.jsonl")
     async def export(job_id: str):

@@ -11,41 +11,44 @@ runtime:
 models:
   generator:
     api_url: https://tokenhub.tencentmaas.com/v1/chat/completions
-    model_name: deepseek-v4-flash-0731
-    key_name_of_api_key: TENCENT_MAAS_API_KEY
+    model_name: deepseek-v4-flash-1017
+    key_name_of_api_key: QA_API_KEY
     max_workers: 1
   classifier:
     api_url: https://tokenhub.tencentmaas.com/v1/chat/completions
-    model_name: deepseek-v4-flash-0731
-    key_name_of_api_key: TENCENT_MAAS_API_KEY
+    model_name: deepseek-v4-flash-1017
+    key_name_of_api_key: CLASSIFIER_API_KEY
     max_workers: 1
   inspector:
-    api_url: https://modelservice.jdcloud.com/v1/chat/completions
-    model_name: GLM-5.3
-    key_name_of_api_key: JDCLOUD_API_KEY
+    api_url: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+    model_name: qwen3.8-flash
+    key_name_of_api_key: JUDGE_API_KEY
     max_workers: 1
 workflow:
   name: difficulty_routed_qa
   parameters:
     questions_per_source: 3
-    deduplicate_qa: false
     scenario:
       model: generator
       prompt: ScenarioPrompt
       parser: scenarios_json.v1
-      prompt_file: /root/MasterRAG/config/prompts/defaults/scenario-911d4d7f734e9dcc0ae7c6d466698715b21a22538e37d648a95b813c3ead263d.md
+      prompt_file: /root/MasterRAG/config/prompts/defaults/scenario-3a17274d06cfc4353f41a0a85bdd0212f751e35e4c6ec610b176bb88f95c561d.md
     qa:
       model: generator
       prompt: GeneratePrompt
       parser: qa_json.v1
-      prompt_file: /root/MasterRAG/config/prompts/defaults/qa-d6e9469d262a7737101109c21bd9138fd559a7dbf577af15a3084245717d13b6.md
+      prompt_file: /root/MasterRAG/config/prompts/defaults/qa-36bd964c09d136d558103c9156c7fb292b7146c523ae5c63c5c83c303d91d3b4.md
     classification:
       model: classifier
       prompt: QAClassificationPrompt
       parser: classification_json.v1
-      prompt_file: /root/MasterRAG/config/prompts/defaults/classification-edc59be11c23b537838233bbfeecda097a488a839f4955e886a8a6ce8d839de2.md
+      prompt_file: /root/MasterRAG/config/prompts/defaults/classification-27ff89449f05e75ead2334235699d83b91ede1ffa01a921ae905a2e37c86fb89.md
     inspection:
       model: inspector
       prompt: InspectAndRevisePrompt
       parser: inspection_revision_json.v1
-      prompt_file: /root/MasterRAG/config/prompts/defaults/inspection-9d001467a34b274418ce25151327ef7eb754d53621b0fec7fc5fcc33565601e0.md
+      prompt_file: /root/MasterRAG/config/prompts/defaults/inspection-d1a6a1b39c7caa30cd618c2b9011ff831e2159e3493626e36a3a163565c00f55.md
+    topic_catalog_file: /root/MasterRAG/config/topics/defaults/company-categories-e615acdb212111592a70f0573da541ff2758db518f553fc77b41b23ae156c575.yaml
+    scenario_instructions: 生成有来源依据的企业工作问题场景。
+    inspection_instructions: 依据原文检查原始问答；高重要性保留原问答并给出具体人工建议，低重要性有可靠依据时可修订，否则保留原问答并说明原因。
+    classification_instructions: 根据 categories 目录判断业务重要性和核实难度，原样输出唯一类别 id。

@@ -9,7 +9,10 @@ import { backendBaseUrl } from '@/lib/constants'
 import { useAuthStore } from '@/stores/state'
 import BatchRetrievalView from './BatchRetrievalView'
 
-beforeEach(() => { spyOn(workflowApi, 'findBatchWorkflow').mockResolvedValue(null) })
+beforeEach(() => {
+  spyOn(workflowApi, 'findBatchWorkflow').mockResolvedValue(null)
+  spyOn(workflowApi, 'getWorkflowLogs').mockResolvedValue({ text: '', offset: 0, next_offset: 0, has_more: false })
+})
 
 afterEach(() => { cleanup(); mock.restore(); sessionStorage.clear() })
 
@@ -77,6 +80,7 @@ describe('minimal batch retrieval', () => {
     expect(start.mock.calls[0][0]).toEqual({ centers: ['产品供应部'], graph_depth: 2, rag_top_k: 10 })
     await waitFor(() => expect(view.getByText('1 package ready')).toBeTruthy())
     expect(view.getByRole('progressbar').getAttribute('value')).toBe('1')
+    fireEvent.click(view.getByRole('button', { name: /4.*Distill QA/ }))
     expect(view.getByRole('button', { name: 'Send batch to distillation' }).hasAttribute('disabled')).toBe(true)
     expect(view.getByText('Configure data-work-flow before starting distillation.')).toBeTruthy()
   })
@@ -137,6 +141,8 @@ describe('minimal batch retrieval', () => {
     const send = spyOn(workflowApi, 'submitBatchWorkflow').mockRejectedValueOnce(new Error('unconfirmed'))
       .mockResolvedValue(created)
     const view = renderWithProviders(<BatchRetrievalView />)
+    await waitFor(() => expect(view.getByText('1 package ready')).toBeTruthy())
+    fireEvent.click(view.getByRole('button', { name: /4.*Distill QA/ }))
     await waitFor(() => expect(view.getByRole('button', { name: 'Send batch to distillation' }).hasAttribute('disabled')).toBe(false))
     fireEvent.click(view.getByRole('button', { name: 'Send batch to distillation' }))
     await waitFor(() => expect(view.getByRole('alert').textContent).toContain('Unable to confirm'))

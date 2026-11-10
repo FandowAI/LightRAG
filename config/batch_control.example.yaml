@@ -1,0 +1,154 @@
+# Opt-in example. No running service reads this file automatically.
+# Replace paths, immutable environment/profile IDs and model details before use.
+version: 1
+config_root: ../../config/batch-control
+runtime_root: /data/lightrag/managed-batches
+ui_directory: ../lightrag/api/webui
+recipe_file: data_workflow_job.yaml
+
+# Administrator-owned adoption declarations. These are not workflow recipe fields.
+# Keep empty until the source has the adoption-capable single-worker server.
+legacy_sources: {}
+
+# Independent training exports; these limits are not sent to data-work-flow.
+# Exceeding any limit fails the whole export rather than publishing a subset.
+training_export_limits:
+  max_evidence_bytes: 1073741824
+  max_row_bytes: 134217728
+  max_output_bytes: 536870912
+  max_samples: 1000000
+  timeout_seconds: 600
+
+# Shared across all managed RAG and workflow processes; not workflow recipe fields.
+provider_limits:
+  defaults:
+    max_concurrent: 32
+    requests_per_minute: null
+    tokens_per_minute: null
+    default_output_tokens: 8192
+    queue_timeout_seconds: 900
+  endpoints: {}
+  # endpoints:
+  #   https://provider.example/v1:
+  #     max_concurrent: 20
+  #     requests_per_minute: 600
+  #     tokens_per_minute: 1000000
+# legacy_sources:
+#   existing-test:
+#     url: http://127.0.0.1:9631
+#     workspace: h200_lightrag_test_9631
+#     working_directory: /data/lightrag/rag_storage
+#     input_directory: /data/lightrag/inputs
+#     command_directory: /root/MasterRAG/LightRAG
+#     command_sha256: REPLACE_WITH_INSPECTION_COMMAND_DIGEST
+#     credential_id: legacy-service-key
+#     key_name_of_api_key: LIGHTRAG_API_KEY
+#     profile_refs:
+#       primary: chat-v1
+#       query: chat-v1
+#       extract: chat-v1
+#       keyword: chat-v1
+#       vlm: chat-v1
+#       embedding: embedding-v1
+#     resources:
+#       PROMPT_DIR: /root/MasterRAG/LightRAG/prompts
+#       ENTITY_IDENTITY_REGISTRY_FILE: /data/lightrag/config/entity-identities.private.json
+# Register legacy-service-key in credentials with the source API-key env-file path.
+
+rag:
+  parse_engine: native
+  chunking_strategy: paragraph_semantic
+  chunk_size: 2000
+  chunk_overlap_size: 100
+  max_parallel_insert: 5
+  max_parallel_parse_native: 5
+  embedding_profile: embedding-v1
+  model_profiles:
+    primary: chat-v1
+  role_profiles:
+    extract: primary
+    keyword: primary
+    query: primary
+  role_concurrency:
+    extract: 10
+    keyword: 4
+    query: 4
+
+retrieval:
+  ordinary:
+    mode: mix
+    top_k: 40
+    chunk_top_k: 20
+    max_entity_tokens: 6000
+    max_relation_tokens: 8000
+    max_total_tokens: 30000
+  batch:
+    graph_depth: 2
+    rag_top_k: 10
+    near_dedup: true
+    near_threshold: 0.995
+
+bridge:
+  environment_id: workflow-v1
+  credential_id: workflow-keys
+  input_ids: [documents, query-results]
+  records_path: []
+  max_input_bytes: 67108864
+  max_records: 10000
+  max_active_jobs: 1
+  timeout_seconds: null
+
+runtime:
+  project_directory: ..
+  python: ../.venv/bin/python
+  storage_mode: neo4j_milvus
+  storage_credentials_file: /srv/lightrag/secrets/storage.env
+  max_processes: 2
+  startup_timeout: 120
+  stop_timeout: 30
+  heartbeat_seconds: 1
+  health_timeout: 10
+
+environments:
+  workflow-v1:
+    project_directory: ../../data-work-flow
+    python: ../../data-work-flow/.venv/bin/python
+    # Set from: git -C /root/MasterRAG/data-work-flow rev-parse HEAD
+    code_revision: REPLACE_WITH_WORKFLOW_COMMIT
+    dependency_revision: REPLACE_WITH_LOCK_VERSION
+
+credentials:
+  model-keys: /srv/lightrag/secrets/models.env
+  workflow-keys: /srv/lightrag/secrets/workflow.env
+
+inputs:
+  # Only these administrator-owned locations can be selected by task requests.
+  documents: [/srv/lightrag/sources/documents]
+  query-results: [/srv/lightrag/sources/query-results]
+
+profiles:
+  chat-v1:
+    binding: openai
+    model_name: REPLACE_WITH_CHAT_MODEL
+    api_url: https://model-host.invalid/v1
+    credential_id: model-keys
+    key_name_of_api_key: CHAT_API_KEY
+    max_async: 8
+    timeout: 180
+  embedding-v1:
+    binding: openai
+    model_name: REPLACE_WITH_EMBEDDING_MODEL
+    api_url: http://127.0.0.1:9622/v1
+    credential_id: model-keys
+    key_name_of_api_key: EMBEDDING_API_KEY
+    dimensions: 4096  # Must match the actual embedding model.
+    batch_size: 16
+    max_async: 8
+    max_tokens: 8192
+
+grants:
+  # This explicit grant makes the configured shared API key an administrator.
+  # Restrict actions/resources or add separate authenticated-user principals as needed.
+  - actor: api-key
+    actions: ['*']
+    resources: ['*']

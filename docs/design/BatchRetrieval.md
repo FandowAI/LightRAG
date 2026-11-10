@@ -58,8 +58,11 @@ judgment. Source differences in time, numbers, conditions and conclusions stay.
 ## Durability, export and API
 
 Retrieval jobs use a workspace-local SQLite ledger and the initialized server RAG instance.
-One active batch is allowed per workspace. The UI shows real per-center retrieval
-and dedup/save progress; package counts increment after atomic saves. Failed
+One active batch is allowed per workspace. There is no fixed center-count limit
+per request: all valid selected centers are retained without truncation, with
+duplicate names processed once. Centers run sequentially within the batch.
+The UI shows real per-center retrieval and dedup/save progress; package counts
+increment after atomic saves. Failed
 retrieval is a technical failure, not a content-review decision. Stopping retains
 completed packages and snapshots; no restart automatically repeats paid calls.
 

@@ -592,6 +592,37 @@ class ReprocessResponse(BaseModel):
     )
 
 
+class ReprocessFailedRequest(BaseModel):
+    """Optional scope for a manual retry of failed documents.
+
+    When ``doc_ids`` is omitted, the endpoint keeps its existing behavior and
+    retries every eligible failed document. When supplied, only IDs currently
+    in FAILED status are considered; other selected IDs are ignored.
+    """
+
+    doc_ids: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "Document IDs to retry. Omit to retry all failed documents; when "
+            "provided, only selected FAILED documents are retried."
+        ),
+    )
+
+    @field_validator("doc_ids", mode="after")
+    @classmethod
+    def validate_doc_ids(cls, doc_ids: Optional[List[str]]) -> Optional[List[str]]:
+        if doc_ids is None:
+            return None
+        if not doc_ids:
+            raise ValueError("Document IDs list cannot be empty")
+        validated_ids = [doc_id.strip() for doc_id in doc_ids]
+        if any(not doc_id for doc_id in validated_ids):
+            raise ValueError("Document ID cannot be empty")
+        if len(validated_ids) != len(set(validated_ids)):
+            raise ValueError("Document IDs must be unique")
+        return validated_ids
+
+
 class CancelPipelineResponse(BaseModel):
     """Response model for pipeline cancellation operation
 
@@ -2687,9 +2718,9 @@ def _resolve_text_chunking(
 ) -> tuple[str, dict]:
     """Freeze a ``chunking`` request into ``(process_options, chunk_options)``.
 
-    When ``chunking`` is ``None`` this reproduces today's behavior exactly:
-    fixed-token strategy with the snapshot built from
-    ``rag.addon_params['chunker']``.
+    Managed batches inherit their compiled default when ``chunking`` is absent.
+    Other callers retain fixed-token defaults. Explicit per-request strategies
+    always take precedence and are frozen into the accepted document snapshot.
 
     Otherwise the validated, strategy-specific params are merged into the
     selected strategy's sub-dict. ``chunk_token_size`` rides along inside
@@ -2708,6 +2739,9 @@ def _resolve_text_chunking(
             this synchronously so the failure surfaces as HTTP 422 before any
             background work is scheduled.
     """
+    if chunking is None and os.getenv("LIGHTRAG_MANAGED_BATCH_ID"):
+        strategy = os.getenv("LIGHTRAG_BATCH_CHUNKING_STRATEGY", "paragraph_semantic")
+        chunking = TextChunkingConfig(strategy=strategy)
     if chunking is None:
         # No request-driven config: reproduce today's behavior verbatim,
         # including not introducing new validation on the default path.
@@ -6978,10 +7012,14 @@ def create_document_routes(
     )
     async def reprocess_failed_documents(
         managed_tasks: set = Depends(get_managed_background_tasks),
+        request: Optional[ReprocessFailedRequest] = None,
     ):
         """
         Reprocess existing failed, pending, or interrupted document records
-        without scanning the input directory for new files.
+        without scanning the input directory for new files. If ``request``
+        contains ``doc_ids``, only selected documents currently in FAILED
+        status are retried; the pending/interrupted recovery behavior remains
+        available when the request body is omitted.
 
         Pure storage-driven recovery: this endpoint publishes a sticky manual
         retry request into the workspace ingress and drives the processing
@@ -7078,6 +7116,11 @@ def create_document_routes(
                 ingress,
                 request_id,
                 state,
+                retry_doc_ids=(
+                    tuple(request.doc_ids)
+                    if request is not None and request.doc_ids is not None
+                    else None
+                ),
             )
 
         async def _work():

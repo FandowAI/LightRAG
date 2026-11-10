@@ -41,11 +41,17 @@ class DataWorkflowService:
         self.workspace = workspace
         self.config_path = config_path
         self.batch_lookup = batch_lookup
+        configured_root = os.getenv("LIGHTRAG_DATA_WORKFLOW_CONFIG_ROOT")
+        self.config_root = Path(configured_root) if configured_root else None
 
     def _resources(self):
         config = self.config_path or configuration_path()
         settings = load_settings(config)
         namespace = hashlib.sha256(self.workspace.encode("utf-8")).hexdigest()[:16]
+        if self.config_root is not None:
+            from .managed_defaults import prepare_defaults
+
+            settings = prepare_defaults(settings, self.config_root, namespace)
         root = settings.jobs_directory / namespace
         return settings, JobStore(root / "jobs.sqlite3"), root
 
@@ -54,7 +60,10 @@ class DataWorkflowService:
         issues = []
         try:
             validate_execution(
-                settings, RecipeSettingsStore(settings, root).effective()
+                settings,
+                RecipeSettingsStore(
+                    settings, root, config_root=self.config_root
+                ).effective(),
             )
         except (ValueError, OSError) as exc:
             issues.append(str(exc))
@@ -73,28 +82,40 @@ class DataWorkflowService:
 
     def recipe_settings(self) -> dict:
         settings, _, root = self._resources()
-        return RecipeSettingsStore(settings, root).get()
+        return RecipeSettingsStore(settings, root, config_root=self.config_root).get()
 
     def save_recipe_settings(self, revision: str, values: RecipeValues) -> dict:
         settings, _, root = self._resources()
-        return RecipeSettingsStore(settings, root).save(revision, values)
+        return RecipeSettingsStore(settings, root, config_root=self.config_root).save(
+            revision, values
+        )
 
     def prompt_files(self, stage: str) -> dict:
         settings, _, root = self._resources()
-        return PromptFiles(settings, root.name).list(stage)
+        return PromptFiles(settings, root.name, config_root=self.config_root).list(
+            stage
+        )
 
     def read_prompt(self, stage: str, path: str) -> dict:
         settings, _, root = self._resources()
         if not path:
-            selected = RecipeSettingsStore(settings, root).effective()
+            selected = RecipeSettingsStore(
+                settings, root, config_root=self.config_root
+            ).effective()
             selected["workflow"]["parameters"][stage]["prompt_file"] = None
-            recipe = materialize_builtin_prompts(settings, selected)
+            recipe = materialize_builtin_prompts(
+                settings, selected, config_root=self.config_root
+            )
             path = recipe["workflow"]["parameters"][stage]["prompt_file"]
-        return PromptFiles(settings, root.name).read(stage, path)
+        return PromptFiles(settings, root.name, config_root=self.config_root).read(
+            stage, path
+        )
 
     def save_prompt(self, stage: str, filename: str, content: str) -> dict:
         settings, _, root = self._resources()
-        return PromptFiles(settings, root.name).save(stage, filename, content)
+        return PromptFiles(settings, root.name, config_root=self.config_root).save(
+            stage, filename, content
+        )
 
     @staticmethod
     def preview_prompt(stage: str, content: str) -> dict:
@@ -198,14 +219,30 @@ class DataWorkflowService:
                 directory,
                 "settings.json",
                 settings.model_dump_json(indent=2),
+                config_root=self.config_root,
             )
             if snapshot is not None:
                 (directory / "batch-source.json").write_text(
                     snapshot.model_dump_json(indent=2), encoding="utf-8"
                 )
-            recipe = RecipeSettingsStore(settings, root).effective()
-            recipe = materialize_builtin_prompts(settings, recipe)
-            write_job_config(settings.workflow_config, directory, recipe=recipe)
+            recipe = RecipeSettingsStore(
+                settings, root, config_root=self.config_root
+            ).effective()
+            recipe = materialize_builtin_prompts(
+                settings, recipe, config_root=self.config_root
+            )
+            write_job_config(
+                settings.workflow_config,
+                directory,
+                recipe=recipe,
+                config_root=self.config_root,
+            )
+            if os.getenv("LIGHTRAG_MANAGED_BATCH_ID"):
+                from lightrag.batch_control.provider_quota.wiring import (
+                    business_workflow_launcher,
+                )
+
+                business_workflow_launcher(recipe, directory, job_id)
             self._spawn(store, record, "prepare-run" if start else "prepare")
         except Exception as exc:
             store.update(
@@ -293,6 +330,18 @@ class DataWorkflowService:
             "offset": offset,
         }
 
+    def result_preview(self, job_id: str, offset: int, limit: int) -> dict:
+        from .results import preview
+
+        _, store, _ = self._resources()
+        return preview(store.get(job_id), offset, limit)
+
+    def artifact_file(self, job_id: str, name: str) -> Path:
+        from .results import artifact
+
+        _, store, _ = self._resources()
+        return artifact(store.get(job_id), name)
+
     def logs(self, job_id: str, stream: str, offset: int, limit: int) -> dict:
         _, store, _ = self._resources()
         record = store.get(job_id)
@@ -306,6 +355,8 @@ class DataWorkflowService:
                 "has_more": False,
             }
         with path.open("rb") as handle:
+            if offset > os.fstat(handle.fileno()).st_size:
+                offset = 0
             handle.seek(offset)
             raw = handle.read(limit)
             has_more = bool(handle.read(1))

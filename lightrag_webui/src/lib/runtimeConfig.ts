@@ -21,6 +21,7 @@ declare global {
   interface Window {
     __LIGHTRAG_CONFIG__?: {
       apiPrefix?: string
+      batchOnly?: boolean
       /**
        * Still injected by the server and pinned as part of the published
        * `{apiPrefix, webuiPrefix}` shape (docs/MultiSiteDeployment.md), so
@@ -61,4 +62,8 @@ export function getRuntimeApiPrefix(): string | undefined {
 export function getRuntimeWebuiTitle(): string | null | undefined {
   if (typeof window === 'undefined') return undefined
   return window.__LIGHTRAG_CONFIG__?.webuiTitle
+}
+
+export function isBatchOnlyDeployment(): boolean {
+  return typeof window !== 'undefined' && window.__LIGHTRAG_CONFIG__?.batchOnly === true
 }

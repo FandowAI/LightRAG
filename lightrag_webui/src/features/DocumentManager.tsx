@@ -28,10 +28,23 @@ import {
   DialogTitle,
   DialogTrigger
 } from '@/components/ui/Dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger
+} from '@/components/ui/AlertDialog'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip'
 
 import {
   scanNewDocuments,
+  reprocessFailedDocuments,
+  cancelPipeline,
   getDocumentsPaginatedWithTimeout,
   DocStatus,
   DocStatusResponse,
@@ -44,7 +57,7 @@ import { toast } from 'sonner'
 import { useBackendState } from '@/stores/state'
 import { copyToClipboard } from '@/utils/clipboard'
 
-import { RefreshCwIcon, ActivityIcon, ArrowUpIcon, ArrowDownIcon, RotateCcwIcon, CheckSquareIcon, XIcon, AlertTriangle, Info, CopyIcon } from 'lucide-react'
+import { RefreshCwIcon, ActivityIcon, ArrowUpIcon, ArrowDownIcon, RotateCcwIcon, CheckSquareIcon, XIcon, AlertTriangle, Info, CopyIcon, Square } from 'lucide-react'
 import PipelineStatusDialog from '@/components/documents/PipelineStatusDialog'
 import {
   getStatusRequestFilters,
@@ -403,8 +416,11 @@ export default function DocumentManager() {
   }, []);
 
   const [showPipelineStatus, setShowPipelineStatus] = useState(false)
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+  const [isCancellingPipeline, setIsCancellingPipeline] = useState(false)
   const { t, i18n } = useTranslation()
   const health = useBackendState.use.health()
+  const pipelineBusy = useBackendState.use.pipelineBusy()
   const pipelineActive = useBackendState.use.pipelineActive()
 
   const currentTab = useSettingsStore.use.currentTab()
@@ -456,6 +472,7 @@ export default function DocumentManager() {
 
   // State for document selection
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
+  const [selectedDocStatuses, setSelectedDocStatuses] = useState<Record<string, DocStatus>>({})
   const isSelectionMode = selectedDocIds.length > 0
 
   // Add refs to track previous pipelineActive state and current interval
@@ -486,7 +503,7 @@ export default function DocumentManager() {
 
 
   // Handle checkbox change for individual documents
-  const handleDocumentSelect = useCallback((docId: string, checked: boolean) => {
+  const handleDocumentSelect = useCallback((docId: string, status: DocStatus, checked: boolean) => {
     setSelectedDocIds(prev => {
       if (checked) {
         return [...prev, docId]
@@ -494,11 +511,21 @@ export default function DocumentManager() {
         return prev.filter(id => id !== docId)
       }
     })
+    setSelectedDocStatuses(prev => {
+      const next = { ...prev }
+      if (checked) {
+        next[docId] = status
+      } else {
+        delete next[docId]
+      }
+      return next
+    })
   }, [])
 
   // Handle deselect all documents
   const handleDeselectAll = useCallback(() => {
     setSelectedDocIds([])
+    setSelectedDocStatuses({})
   }, [])
 
   // Handle sort column click
@@ -608,10 +635,20 @@ export default function DocumentManager() {
     return selectedCurrentPageCount > 0
   }, [selectedCurrentPageCount])
 
+  const selectedFailedDocIds = useMemo(
+    () => selectedDocIds.filter(docId => selectedDocStatuses[docId] === 'failed'),
+    [selectedDocIds, selectedDocStatuses]
+  )
+
   // Handle select current page
   const handleSelectCurrentPage = useCallback(() => {
     setSelectedDocIds(currentPageDocIds)
-  }, [currentPageDocIds])
+    setSelectedDocStatuses(
+      Object.fromEntries(
+        filteredAndSortedDocs.map(doc => [doc.id, doc.status])
+      )
+    )
+  }, [currentPageDocIds, filteredAndSortedDocs])
 
 
   // Get selection button properties
@@ -1265,6 +1302,64 @@ export default function DocumentManager() {
     }
   }, [t, startActivityProbe, refreshDocumentsThrottled])
 
+  const retrySelectedFailedDocuments = useCallback(async () => {
+    if (selectedFailedDocIds.length === 0) return
+
+    try {
+      const { status, message } = await reprocessFailedDocuments(selectedFailedDocIds)
+
+      if (!isMountedRef.current) return
+
+      toast.message(message || status)
+      setSelectedDocIds([])
+      setSelectedDocStatuses({})
+      startActivityProbe('retry')
+      refreshDocumentsThrottled({ auto: false })
+    } catch (err) {
+      if (isMountedRef.current) {
+        toast.error(t('documentPanel.documentManager.errors.retryFailed', { error: errorMessage(err) }))
+      }
+    }
+  }, [selectedFailedDocIds, t, startActivityProbe, refreshDocumentsThrottled])
+
+  const retryAllFailedDocuments = useCallback(async () => {
+    if (failedCount === 0) return
+
+    try {
+      const { status, message } = await reprocessFailedDocuments()
+
+      if (!isMountedRef.current) return
+
+      toast.message(message || status)
+      startActivityProbe('retry')
+      refreshDocumentsThrottled({ auto: false })
+    } catch (err) {
+      if (isMountedRef.current) {
+        toast.error(t('documentPanel.documentManager.errors.retryAllFailed', { error: errorMessage(err) }))
+      }
+    }
+  }, [failedCount, t, startActivityProbe, refreshDocumentsThrottled])
+
+  const handleCancelPipeline = useCallback(async () => {
+    setShowCancelConfirm(false)
+    setIsCancellingPipeline(true)
+    try {
+      const result = await cancelPipeline()
+      if (!isMountedRef.current) return
+      if (result.status === 'cancellation_requested') {
+        toast.success(t('documentPanel.pipelineStatus.cancelSuccess'))
+      } else {
+        toast.info(t('documentPanel.pipelineStatus.cancelNotBusy'))
+      }
+    } catch (err) {
+      if (isMountedRef.current) {
+        toast.error(t('documentPanel.pipelineStatus.cancelFailed', { error: errorMessage(err) }))
+      }
+    } finally {
+      if (isMountedRef.current) setIsCancellingPipeline(false)
+    }
+  }, [t])
+
   // Handle manual refresh with pagination reset logic
   const handleManualRefresh = useCallback(async () => {
     await enqueueRefresh({
@@ -1392,6 +1487,7 @@ export default function DocumentManager() {
   // Handle documents deleted callback
   const handleDocumentsDeleted = useCallback(async () => {
     setSelectedDocIds([])
+    setSelectedDocStatuses({})
 
     // The probe supersedes what used to be here — a single immediate refresh
     // (which raced the background deletion and returned the rows it was
@@ -1418,6 +1514,8 @@ export default function DocumentManager() {
       pending: 0,
       failed: 0
     });
+    setSelectedDocIds([])
+    setSelectedDocStatuses({})
 
     // Perform one immediate refresh to confirm clear operation
     if (isMountedRef.current) {
@@ -1469,6 +1567,7 @@ export default function DocumentManager() {
       sortDirection
     })
     setSelectedDocIds([])
+    setSelectedDocStatuses({})
   }
 
   // Central effect to handle all data fetching - genuine side effect (network call)
@@ -1517,6 +1616,37 @@ export default function DocumentManager() {
             >
               <ActivityIcon /> {t('documentPanel.documentManager.pipelineStatusButton')}
             </Button>
+            {pipelineBusy && (
+              <AlertDialog open={showCancelConfirm} onOpenChange={setShowCancelConfirm}>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    disabled={isCancellingPipeline}
+                    tooltip={t('documentPanel.pipelineStatus.cancelTooltip')}
+                  >
+                    <Square className="h-4 w-4" />
+                    {isCancellingPipeline
+                      ? t('documentPanel.pipelineStatus.cancelInProgress')
+                      : t('documentPanel.pipelineStatus.cancelButton')}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{t('documentPanel.pipelineStatus.cancelConfirmTitle')}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {t('documentPanel.pipelineStatus.cancelConfirmDescription')}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => { void handleCancelPipeline() }}>
+                      {t('documentPanel.pipelineStatus.cancelConfirmButton')}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
           </div>
 
           {/* Pagination Controls in the middle */}
@@ -1540,6 +1670,30 @@ export default function DocumentManager() {
                 selectedDocIds={selectedDocIds}
                 onDocumentsDeleted={handleDocumentsDeleted}
               />
+            )}
+            {selectedFailedDocIds.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={retrySelectedFailedDocuments}
+                side="bottom"
+                tooltip={t('documentPanel.documentManager.retrySelectedTooltip')}
+              >
+                <RotateCcwIcon className="h-4 w-4" />
+                {t('documentPanel.documentManager.retrySelected', { count: selectedFailedDocIds.length })}
+              </Button>
+            )}
+            {failedCount > 0 && selectedFailedDocIds.length === 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={retryAllFailedDocuments}
+                side="bottom"
+                tooltip={t('documentPanel.documentManager.retryAllFailedTooltip')}
+              >
+                <RotateCcwIcon className="h-4 w-4" />
+                {t('documentPanel.documentManager.retryAllFailed', { count: failedCount })}
+              </Button>
             )}
             {isSelectionMode && hasCurrentPageSelection ? (
               (() => {
@@ -1853,7 +2007,7 @@ export default function DocumentManager() {
                             <TableCell className="text-center">
                               <Checkbox
                                 checked={selectedDocIds.includes(doc.id)}
-                                onCheckedChange={(checked) => handleDocumentSelect(doc.id, checked === true)}
+                                onCheckedChange={(checked) => handleDocumentSelect(doc.id, doc.status, checked === true)}
                                 // disabled={doc.status !== 'processed'}
                                 className="mx-auto"
                               />

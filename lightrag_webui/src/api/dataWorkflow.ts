@@ -66,7 +66,6 @@ export type ModelFieldSchema = {
 }
 export type RecipeValues = {
   questions_per_source: number
-  deduplicate_qa: boolean
   scenario_instructions: string
   classification_instructions: string
   inspection_instructions: string
@@ -215,3 +214,16 @@ export const getWorkflowLogs = async (
       timeout: 15000
     })
   ).data
+
+export type WorkflowResultsPage = {
+  items: { question: string; answer: string; source_id: string; work_item_id: string; version_id: string }[]
+  offset: number
+  next_offset: number
+  has_more: boolean
+}
+
+export const getWorkflowResults = async (jobId: string, offset: number, signal?: AbortSignal): Promise<WorkflowResultsPage> =>
+  (await lightragAxios.get(`${base}/jobs/${encodeURIComponent(jobId)}/results`, { params: { offset, limit: 20 }, signal })).data
+
+export const downloadWorkflowArtifact = async (jobId: string, artifact: 'review' | 'stderr', signal?: AbortSignal): Promise<Blob> =>
+  (await lightragAxios.get(`${base}/jobs/${encodeURIComponent(jobId)}/files/${artifact}`, { signal, responseType: 'blob' })).data

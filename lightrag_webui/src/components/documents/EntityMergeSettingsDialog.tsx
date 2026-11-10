@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Settings2Icon } from 'lucide-react'
 import { toast } from 'sonner'
@@ -14,10 +14,21 @@ import {
   type EntityMergeSnapshot
 } from '@/api/entityMerge'
 import { errorMessage } from '@/lib/utils'
+import useRequestScope from '@/hooks/useRequestScope'
+import BatchChunkingSettings from './BatchChunkingSettings'
+import type { BatchClient } from '@/api/batchControl'
+import { useBatchContext } from '@/stores/batchContext'
 
-export default function EntityMergeSettingsDialog() {
+export default function EntityMergeSettingsDialog({ chunkingClient }: { chunkingClient?: BatchClient } = {}) {
+  const epoch = useBatchContext((value) => value.epoch)
+  return <EntityMergeSettingsContent key={epoch} chunkingClient={chunkingClient} />
+}
+
+function EntityMergeSettingsContent({ chunkingClient }: { chunkingClient?: BatchClient }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
+  const scope = useMemo(() => ({ open }), [open])
+  const begin = useRequestScope(scope)
   const [snapshot, setSnapshot] = useState<EntityMergeSnapshot | null>(null)
   const [settings, setSettings] = useState<EntityMergeSettings | null>(null)
   const [loading, setLoading] = useState(false)
@@ -29,51 +40,59 @@ export default function EntityMergeSettingsDialog() {
 
   useEffect(() => {
     if (!open) return
-    let active = true
-    getEntityMergeSettings().then(data => {
-      if (active) {
+    const request = begin()
+    getEntityMergeSettings(request.signal).then(data => {
+      if (request.current()) {
         setSnapshot(data)
         setSettings(data.settings)
       }
     }).catch(error => {
-      if (active) toast.error(errorMessage(error))
+      if (request.current()) toast.error(errorMessage(error))
     }).finally(() => {
-      if (active) setLoading(false)
+      if (request.current()) setLoading(false)
     })
-    return () => { active = false }
-  }, [open])
+    return request.cancel
+  }, [open, begin])
 
   const changeOpen = (next: boolean) => {
     if (next) {
       setLoading(true)
       setSnapshot(null)
       setPreview(null)
+      setSaving(false)
     }
     setOpen(next)
   }
 
   const save = async () => {
     if (!snapshot || !settings) return
+    const request = begin()
+    if (!request.current()) { request.finish(); return }
     setSaving(true)
     try {
-      const data = await saveEntityMergeSettings(snapshot.revision, settings)
+      const data = await saveEntityMergeSettings(snapshot.revision, settings, request.signal)
+      if (!request.current()) return
       setSnapshot(data)
       setSettings(data.settings)
       toast.success(t('entityMerge.saved', '图谱写入设置已保存'))
     } catch (error) {
-      toast.error(errorMessage(error))
+      if (request.current()) toast.error(errorMessage(error))
     } finally {
-      setSaving(false)
+      if (request.current()) setSaving(false)
+      request.finish()
     }
   }
 
   const runPreview = async () => {
+    const request = begin()
+    if (!request.current()) { request.finish(); return }
     setPreview(null)
     try {
-      setPreview(await previewEntityMerge(name.trim(), entityType.trim()))
+      const result = await previewEntityMerge(name.trim(), entityType.trim(), request.signal)
+      if (request.current()) setPreview(result)
     } catch (error) {
-      toast.error(errorMessage(error))
-    }
+      if (request.current()) toast.error(errorMessage(error))
+    } finally { request.finish() }
   }
 
   const numberField = (
@@ -116,6 +135,7 @@ export default function EntityMergeSettingsDialog() {
             ? t('entityMerge.identityDescription', '先查已确认词表，再由模型核对身份和原文证据。不确定时分开保留。')
             : t('entityMerge.description', '只在图谱写入时比较实体名称向量。保存后对后续文档生效。')}</DialogDescription>
         </DialogHeader>
+        {open && <BatchChunkingSettings client={chunkingClient} />}
         {loading && <p className="text-sm">{t('entityMerge.loading', '正在读取设置…')}</p>}
         {snapshot && settings && <div className="space-y-4">
           <div className="rounded border p-3 text-sm space-y-1">

@@ -15,6 +15,7 @@ import { useAuthStore } from '@/stores/state'
 import { applyAiContentNoticeFlag } from '@/stores/aiContentNotice'
 import { navigationService } from '@/services/navigation'
 import { AuthenticationRequiredError, isAuthenticationRequiredError } from '@/api/errors'
+import { assertBatchResponse, batchRequestSignal, bindBatchRequest, selectedBusinessPath, useBatchContext } from '@/stores/batchContext'
 
 // Types
 export type LightragNodeType = {
@@ -468,8 +469,8 @@ axiosInstance.interceptors.request.use((config) => {
   if (apiKey) {
     config.headers['X-API-Key'] = apiKey
   }
-  return config
-})
+  return bindBatchRequest(config)
+}, undefined, { synchronous: true })
 
 // Interceptor：handle token renewal and authentication errors
 /**
@@ -498,6 +499,7 @@ export const toHttpRequestError = (
 
 axiosInstance.interceptors.response.use(
   (response) => {
+    assertBatchResponse(response.config)
     // ========== Check for new token from backend ==========
     const newToken = response.headers['x-new-token'];
     if (newToken) {
@@ -542,6 +544,7 @@ axiosInstance.interceptors.response.use(
     return response;
   },
   async (error: AxiosError) => {
+    assertBatchResponse(error.config)
     if (error.response) {
       if (error.response?.status === 401) {
         const originalRequest = error.config;
@@ -670,8 +673,11 @@ export const scanNewDocuments = async (): Promise<ScanResponse> => {
   return response.data
 }
 
-export const reprocessFailedDocuments = async (): Promise<ReprocessFailedResponse> => {
-  const response = await axiosInstance.post('/documents/reprocess_failed')
+export const reprocessFailedDocuments = async (docIds?: string[]): Promise<ReprocessFailedResponse> => {
+  const response = await axiosInstance.post(
+    '/documents/reprocess_failed',
+    docIds && docIds.length > 0 ? { doc_ids: docIds } : undefined
+  )
   return response.data
 }
 
@@ -1017,9 +1023,12 @@ export const queryTextStream = async (
   onLlmGenerated?: (llmGenerated: boolean) => void
 ) => {
   const headers = _buildStreamHeaders();
+  const streamUrl = `${backendBaseUrl}${selectedBusinessPath('/query/stream')}`
+  const boundSignal = batchRequestSignal(signal)
+  signal = boundSignal.signal
 
   try {
-    const response = await fetch(`${backendBaseUrl}/query/stream`, {
+    const response = await fetch(streamUrl, {
       method: 'POST',
       headers,
       body: JSON.stringify(request),
@@ -1050,7 +1059,7 @@ export const queryTextStream = async (
             const retryHeaders: Record<string, string> = { ...(headers as Record<string, string>) };
             retryHeaders['Authorization'] = `Bearer ${newToken}`;
 
-            retryResponse = await fetch(`${backendBaseUrl}/query/stream`, {
+            retryResponse = await fetch(streamUrl, {
               method: 'POST',
               headers: retryHeaders,
               body: JSON.stringify(request),
@@ -1115,6 +1124,8 @@ export const queryTextStream = async (
     }
     console.error('Stream request error:', classified);
     onError?.(classified);
+  } finally {
+    boundSignal.dispose()
   }
 };
 
@@ -1364,7 +1375,7 @@ type InFlightPaginatedDocumentRequest = {
 }
 
 const getPaginatedDocumentsRequestKey = (request: DocumentsRequest): string =>
-  JSON.stringify(request)
+  JSON.stringify([useBatchContext.getState().batch?.id ?? null, request])
 
 // Deduplicate in-flight paginated document requests with identical parameters.
 // This prevents duplicate backend calls caused by overlapping timers/effects or

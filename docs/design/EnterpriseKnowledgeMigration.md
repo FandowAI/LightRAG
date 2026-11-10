@@ -1,10 +1,11 @@
 # Enterprise knowledge and identity migration
 
 `ENTERPRISE_KNOWLEDGE_ENABLED=true` opts the server's existing Neo4j/Milvus
-merge manager into evidence-based identity decisions. Generic callers retain
+merge manager into scope-aware similarity decisions. Generic callers retain
 the legacy behavior. This migration contains extraction policy, source-owned
-facts, a verified glossary, and automatic identity checks. It introduces no
-review queue and never quarantines or drops an uncertain object's knowledge.
+facts, a verified glossary, and automatic similarity-based resolution. It
+introduces no review queue and never quarantines or drops an uncertain object's
+knowledge.
 
 ## Extraction and facts
 
@@ -30,7 +31,7 @@ view. Cached extraction fragments replay committed, source-scoped identity
 mappings when rebuilding nodes and relation endpoints; purge never asks a model
 to make a new identity decision. Existing anchor and custom-chunk journal ordering
 is unchanged: identity resolution precedes the first graph mutation and its
-recovery records. Cancellation observed after an identity call prevents graph
+recovery records. Cancellation observed after name resolution prevents graph
 mutation.
 
 ## Roster and identity
@@ -51,22 +52,36 @@ an otherwise unknown company into an entity's identity fields.
 
 The server first checks verified aliases. Other candidates come from the existing
 typed name VDB and an indexed, workspace-local SQLite alias table. It never scans
-all graph nodes. Explicit scope conflicts cannot merge. The extract-role model
-then compares bounded original chunks; a successful `same` judgment needs a listed
-candidate, confidence at least 0.95, a reason, and exact source-quote matches on
-both sides. A first `same` at least 0.70 that does not pass may receive one
-independent recheck. These confidence thresholds are gates, not measured accuracy.
-Unavailable sources, invalid responses, and uncertain identities keep separate
-objects and their content. Same-name conflicts receive a deterministic suffix
-derived from type, scope, and source identity. Model failures are logged and
-recorded in document metadata, never silently treated as evidence of sameness.
+all graph nodes. Explicit scope conflicts cannot merge. Matching aliases and
+exact names have score 1.0; other scores come from the name-vector cosine search.
+After type and scope checks, candidates are ordered by descending score and name.
+The best candidate is selected when its score reaches `similarity_threshold` and
+its lead over the runner-up reaches `margin_threshold`. A runner-up below the
+similarity threshold still participates in the margin check. With one candidate,
+only the similarity threshold applies. Both thresholds are existing workspace
+settings; this change does not replace them with new defaults.
+
+Similarity scores are heuristic selection criteria, not proof that two objects
+share an identity. Distinct objects with matching types and compatible or missing
+scope can now merge when the score gates pass. Source-owned facts and alias
+provenance are retained; existing graph decisions are not automatically revisited.
+
+Name resolution no longer calls the extract-role model, reads original chunks
+for identity verification, or performs a second model check. Document decision
+metadata records the best and runner-up scores; `judgment` remains null. Threshold
+or margin failures preserve separate objects and their source-owned content.
+Same-name conflicts receive a deterministic suffix derived from type, scope,
+and source identity. The settings API reports model identity verification as
+disabled and `method=vector_similarity`, while retaining the roster snapshot.
 
 The existing per-workspace merge lock spans decisions, anchor/journal writes,
 graph mutation, and name/alias-index publication. This supports the server's
 existing concurrent document ingestion rather than requiring a serial local
-pilot. Only model requests remain governed by the existing extract-role limit.
-Turning automatic checks off leaves explicitly verified roster aliases active.
-Preview reports name candidates only and never calls a model or promises a merge.
+pilot. Extract-role limits still apply to extraction and other existing model
+calls; identity resolution no longer consumes that request pool. Turning
+automatic similarity resolution off leaves explicitly verified roster aliases
+active. Preview returns the name-only score decision without model calls; actual
+ingestion additionally applies source-specific roster and scope rules.
 
 ## Recovery and accepted residue
 
@@ -76,7 +91,7 @@ Manual rename/delete, document purge, and clear retain the existing lifecycle
 hooks. A successful clear also removes workspace alias rows. As with the existing
 name VDB, a crash can leave stale index rows or omit a newly committed alias.
 Stale rows cannot authorize a merge: the node must still exist with the right
-type, scope, and original evidence. An omitted alias can cause a separate object
+type and compatible scope. An omitted alias can cause a separate object
 until reprocessing or an explicit index refresh. This is an accepted conservative
 residue; there is no cross-database transaction and no automatic historical merge.
 

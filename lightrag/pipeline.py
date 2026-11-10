@@ -3276,7 +3276,9 @@ class _PipelineMixin:
         return await run_to_completion(_run)
 
     async def _next_failed_page(
-        self, position: CursorPosition
+        self,
+        position: CursorPosition,
+        retry_doc_ids: tuple[str, ...] | None = None,
     ) -> tuple[dict[str, DocProcessingStatus], CursorPosition]:
         """Fetch ONE bounded page of FAILED docs, hydrated to full status.
 
@@ -3285,7 +3287,30 @@ class _PipelineMixin:
         collapses to the legacy single strict scan (paging disabled). Ordering
         is the immutable ``(created_at, id)`` keyset. A strict page/hydration
         error propagates so the caller neither advances the cursor nor drops a
-        FAILED row (it stays FAILED for the next run)."""
+        FAILED row (it stays FAILED for the next run). A targeted retry reads
+        and hydrates only its requested IDs, then terminates after one page."""
+        if retry_doc_ids is not None:
+            if position is CURSOR_END:
+                return {}, CURSOR_END
+            records = await self.doc_status.get_docs_by_ids(
+                list(retry_doc_ids), strict=True
+            )
+            failed_ids = [
+                doc_id
+                for doc_id, record in records.items()
+                if getattr(record, "status", None) == DocStatus.FAILED.value
+            ]
+            docs = (
+                await self.doc_status.get_full_docs_by_ids(failed_ids, strict=True)
+                if failed_ids
+                else {}
+            )
+            return {
+                doc_id: doc
+                for doc_id, doc in docs.items()
+                if getattr(doc, "status", None) == DocStatus.FAILED.value
+            }, CURSOR_END
+
         page_size = getattr(self, "pipeline_scheduling_page_size", 0)
         if page_size <= 0:
             docs = await self.doc_status.get_docs_by_statuses(
@@ -3394,6 +3419,7 @@ class _PipelineMixin:
         token: str,
         pipeline_status: dict,
         pipeline_status_lock,
+        retry_doc_ids: tuple[str, ...] | None = None,
     ) -> bool:
         """Phase two (LR2 §7.3): page FAILED→PENDING with NO worker running.
 
@@ -3444,7 +3470,7 @@ class _PipelineMixin:
                 token, pipeline_status, pipeline_status_lock
             ):
                 return False
-            docs, cursor = await self._next_failed_page(cursor)
+            docs, cursor = await self._next_failed_page(cursor, retry_doc_ids)
             pages += 1
             if docs:
                 total_reset += await self._reset_failed_page(
@@ -3461,8 +3487,9 @@ class _PipelineMixin:
         pipeline_metrics.increment(pipeline_metrics.MANUAL_RESET_PAGES, pages)
         pipeline_metrics.increment(pipeline_metrics.MANUAL_RESET_DOCS, total_reset)
 
+        scope = "selected " if retry_doc_ids is not None else ""
         reset_message = (
-            f"Manual retry {request_id[:8]}: reset {total_reset} FAILED "
+            f"Manual retry {request_id[:8]}: reset {total_reset} {scope}FAILED "
             "document(s) to PENDING (exclusive phase, no worker running)"
         )
         logger.info(reset_message)
@@ -4148,8 +4175,18 @@ class _PipelineMixin:
         if request_id is None:
             return {}, _AUTO_RESUME_DOC_STATUSES, CURSOR_END
 
+        manual_msg = ingress.peek_next_manual_retry()
+        retry_doc_ids = (
+            manual_msg.retry_doc_ids
+            if manual_msg is not None and manual_msg.request_id == request_id
+            else None
+        )
         if await self._run_exclusive_failed_reset(
-            request_id, token, pipeline_status, pipeline_status_lock
+            request_id,
+            token,
+            pipeline_status,
+            pipeline_status_lock,
+            retry_doc_ids=retry_doc_ids,
         ):
             # ACK only after every FAILED→PENDING reset persisted (LR2 §7.3
             # completion point): a crash before this re-runs the reset; a crash

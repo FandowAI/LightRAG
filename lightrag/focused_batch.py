@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import json
 
-from lightrag.entity_packages import from_rag, equivalence_judge
+from lightrag.entity_packages import from_rag
 from lightrag.focused_evidence import (
     build_packages,
     model_selector,
@@ -218,9 +218,7 @@ async def run_focused(manager, job_id, settings):
                 audits,
                 settings,
                 lambda text: len(manager.rag.tokenizer.encode(text)),
-                equivalence_judge(manager.rag)
-                if settings.near_dedup and getattr(manager.rag, "role_llm_funcs", None)
-                else None,
+                None,
             ),
             timeout=600,
         )
@@ -239,21 +237,18 @@ async def run_focused(manager, job_id, settings):
                 if result is None:
                     return
                 job["phase_done"] += 1
-                duplicates = len(result["shared_evidence"])
                 count = len(result["packages"])
                 state = (
                     "completed"
                     if count
-                    else "skipped_duplicate"
-                    if duplicates
                     else "filtered_out"
                     if result["summary"]["retrieved_chunks"]
                     else "empty"
                 )
                 row.update(status=state, packages=count)
                 job["package_count"] += count
-                job["duplicate_chunks"] += duplicates
-                job["skipped"] += int(state == "skipped_duplicate")
+                job["duplicate_chunks"] += 0
+                job["skipped"] += 0
                 job["filtered"] += int(state == "filtered_out")
                 job["empty"] += int(state == "empty")
 

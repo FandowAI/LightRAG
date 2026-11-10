@@ -17,8 +17,7 @@ from urllib.parse import urlsplit
 
 import psutil
 
-from lightrag.entity_packages import PackageSettings, from_rag, equivalence_judge
-from lightrag.batch_dedup import deduplicate_result
+from lightrag.entity_packages import PackageSettings, from_rag
 from lightrag.evidence_export import record_for, publish
 
 
@@ -307,12 +306,6 @@ class BatchManager:
 
     async def _run(self, job_id, settings):
         try:
-            previous = []
-            judge = (
-                equivalence_judge(self.rag)
-                if settings.near_dedup and getattr(self.rag, "role_llm_funcs", None)
-                else None
-            )
             self.update(
                 job_id,
                 lambda job: job.update(
@@ -339,7 +332,6 @@ class BatchManager:
                             center,
                             settings,
                             relation_evidence_only=True,
-                            equivalence_checker=judge,
                         )
                         if self.retrieve is from_rag
                         else self.retrieve(self.rag, center, settings)
@@ -371,21 +363,7 @@ class BatchManager:
                         )
                         temporary.replace(candidate)
                         self.update(job_id, lambda j: j.update(phase="packaging"))
-                        result = await asyncio.wait_for(
-                            deduplicate_result(
-                                result,
-                                previous,
-                                settings,
-                                lambda text: len(self.rag.tokenizer.encode(text)),
-                                judge,
-                            ),
-                            timeout=600,
-                        )
-                        packages = result["packages"]
-                    duplicate_chunks = result.get("summary", {}).get(
-                        "cross_package_duplicates", 0
-                    )
-                    if packages or duplicate_chunks:
+                    if packages:
                         path = self.root / job_id / f"entity-{index:04d}.json"
                         temporary = path.with_suffix(".tmp")
                         await asyncio.to_thread(
@@ -397,14 +375,11 @@ class BatchManager:
                     state = (
                         "completed"
                         if packages
-                        else "skipped_duplicate"
-                        if duplicate_chunks
                         else "empty"
                     )
                     error = None
                 except Exception as exc:
                     packages, state, error = [], "failed", type(exc).__name__
-                    duplicate_chunks = 0
 
                 def finish(job):
                     row = job["items"][index]
@@ -413,17 +388,14 @@ class BatchManager:
                         row["error_type"] = error
                     job["processed"] += 1
                     job["phase_done"] = job["processed"]
-                    job["dedup_llm_calls"] = getattr(judge, "llm_calls", 0)
+                    job["dedup_llm_calls"] = 0
                     job["package_count"] += len(packages)
                     job["failed"] += int(state == "failed")
                     job["empty"] += int(state == "empty")
-                    job["duplicate_chunks"] += duplicate_chunks
-                    job["skipped"] += int(state == "skipped_duplicate")
+                    job["duplicate_chunks"] += 0
+                    job["skipped"] += 0
 
                 self.update(job_id, finish)
-                # Failed/uncommitted results cannot claim evidence ownership.
-                if packages:
-                    previous.append(result)
 
             def complete(job):
                 status = (
@@ -455,16 +427,12 @@ class BatchManager:
         job = self.get(job_id)
         related = {}
         for index, item in enumerate(job["items"]):
-            if item["status"] in {"completed", "skipped_duplicate"}:
+            if item["status"] == "completed":
                 result = json.loads(
                     (self.root / job_id / f"entity-{index:04d}.json").read_text(
                         encoding="utf-8"
                     )
                 )
-                for ref in result.get("shared_evidence", []):
-                    related.setdefault(ref["owner_package_id"], set()).add(
-                        item["center"]
-                    )
         for index, item in enumerate(job["items"]):
             if item["status"] == "completed":
                 result = json.loads(

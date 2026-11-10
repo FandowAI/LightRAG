@@ -1,7 +1,8 @@
 import { useCallback } from 'react'
 import { useSettingsStore } from '@/stores/settings'
-import { useQuerySettingsStore } from '@/stores/querySettings'
+import { useQuerySettingsStore, type QuerySettingsStore } from '@/stores/querySettings'
 import { useWebuiRetrievalHistoryStore } from '@/stores/webuiRetrievalHistory'
+import type { RetrievalHistoryStore } from '@/stores/retrievalHistory'
 import QuerySettings from '@/components/retrieval/QuerySettings'
 import MessageList from '@/features/retrieval/MessageList'
 import QueryComposer from '@/features/retrieval/QueryComposer'
@@ -16,23 +17,24 @@ import { prepareQueryInput, SUPPORTED_QUERY_MODES } from '@/features/retrieval/q
  * is passed through unmodified (including the `only_need_*` debug switches —
  * those are clamped only on the workspace page).
  */
-export default function RetrievalView() {
+export default function RetrievalView({ historyStore = useWebuiRetrievalHistoryStore, settingsStore = useQuerySettingsStore }: { historyStore?: RetrievalHistoryStore; settingsStore?: QuerySettingsStore } = {}) {
   const { t } = useTranslation()
   // Get current tab to determine if this tab is active (for performance optimization)
   const currentTab = useSettingsStore.use.currentTab()
   const isRetrievalTabActive = currentTab === 'retrieval'
 
   const getQuerySettingsSnapshot = useCallback(
-    () => useQuerySettingsStore.getState().querySettings,
-    []
+    () => settingsStore.getState().querySettings,
+    [settingsStore]
   )
 
   const onUserPromptUsed = useCallback((prompt: string) => {
-    useSettingsStore.getState().addUserPromptToHistory(prompt)
-  }, [])
+    if (settingsStore === useQuerySettingsStore) useSettingsStore.getState().addUserPromptToHistory(prompt)
+    else settingsStore.getState().addUserPromptToHistory(prompt)
+  }, [settingsStore])
 
   const session = useQuerySession({
-    historyStore: useWebuiRetrievalHistoryStore,
+    historyStore,
     getQuerySettingsSnapshot,
     onUserPromptUsed
   })
@@ -83,7 +85,7 @@ export default function RetrievalView() {
           onClear={session.clearMessages}
         />
       </div>
-      <QuerySettings />
+      <QuerySettings store={settingsStore} />
     </div>
   )
 }

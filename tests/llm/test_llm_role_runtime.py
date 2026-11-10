@@ -337,6 +337,9 @@ def test_role_llm_config_logs_once_on_init_with_metadata(
                             "temperature": 0.1,
                             "token": "nested-token",
                             "thinking_token_budget": 2000,
+                            "max_tokens": 8192,
+                            "max_completion_tokens": 4096,
+                            "reasoning": {"max_tokens": 1000, "token": "nested-secret"},
                         },
                         "bedrock_aws_options": {
                             "region_name": "us-east-1",
@@ -355,6 +358,9 @@ def test_role_llm_config_logs_once_on_init_with_metadata(
     assert snapshot["timeout"] == 42
     assert snapshot["metadata"]["provider_options"]["thinking_token_budget"] == 2000
     assert "token" not in snapshot["metadata"]["provider_options"]
+    assert snapshot["metadata"]["provider_options"]["max_tokens"] == 8192
+    assert snapshot["metadata"]["provider_options"]["max_completion_tokens"] == 4096
+    assert snapshot["metadata"]["provider_options"]["reasoning"] == {"max_tokens": 1000}
 
     headers = _role_config_headers(caplog)
     assert len(headers) == 1

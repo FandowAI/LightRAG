@@ -118,7 +118,11 @@ class _RoleLLMMixin:
     # (e.g. "thinking_token_budget" contains "token"). Matched globally at
     # every nesting level during metadata scrubbing, not only inside
     # ``provider_options``.
-    _SAFE_OPTION_KEYS = {"thinking_token_budget"}
+    _SAFE_OPTION_KEYS = {
+        "thinking_token_budget",
+        "max_tokens",
+        "max_completion_tokens",
+    }
 
     @staticmethod
     def _normalize_llm_role(role: str) -> str:

@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 MODEL_ID = "Qwen3-VL-Embedding-8B"
 MODEL_PATH = Path(os.getenv("QWEN_VL_MODEL_PATH", "/data/Qwen3-VL-Embedding-8B"))
 EMBEDDING_DIM = 4096
-MAX_BATCH = 4
+MAX_BATCH = 32
 MAX_TOKENS = 8192
 INSTRUCTION = "Represent the user's input."
 logger = logging.getLogger(__name__)

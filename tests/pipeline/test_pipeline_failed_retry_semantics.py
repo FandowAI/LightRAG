@@ -166,6 +166,37 @@ def test_manual_retry_processes_failed_and_acks(tmp_path):
     asyncio.run(_run())
 
 
+def test_targeted_manual_retry_only_processes_selected_failed_documents(tmp_path):
+    async def _run():
+        extract = _CountingExtract()
+        rag = await _build_rag(tmp_path, f"frs-{uuid4().hex[:8]}", extract)
+        try:
+            selected_id = await _make_failed_doc(rag, "selected.txt", extract)
+            other_id = await _make_failed_doc(rag, "other.txt", extract)
+            ingress = await get_pipeline_ingress(rag.workspace)
+
+            extract.fail = False
+            request_id = uuid4().hex
+            assert ingress.request_manual_retry(
+                request_id,
+                PipelineIngressMessage(
+                    kind="rescan",
+                    retry_failed=True,
+                    request_id=request_id,
+                    retry_doc_ids=(selected_id,),
+                ),
+            ) is ManualRetryPublishResult.ACCEPTED
+            await rag.apipeline_process_enqueue_documents()
+
+            assert await _status_of(rag, selected_id) == DocStatus.PROCESSED.value
+            assert await _status_of(rag, other_id) == DocStatus.FAILED.value
+            assert ingress.snapshot_manual_retries() == []
+        finally:
+            await rag.finalize_storages()
+
+    asyncio.run(_run())
+
+
 def test_two_requests_fifo_one_attempt_each(tmp_path):
     """R1 and R2 pending together: each grants exactly ONE retry attempt,
     consumed earliest-first, one per quiescence cycle — a doc that fails

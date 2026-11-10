@@ -142,7 +142,6 @@ from lightrag.query_validation import validate_query_not_empty, validate_rag_que
 from lightrag.chunker import chunking_by_token_size
 from lightrag.operate import (
     KGRebuildReport,
-    GraphTraversalResult,
     _graph_raw_data_from_traversal,
     _traverse_graph_from_entity,
     _truncate_vdb_content,
@@ -5150,11 +5149,8 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
         self,
         entities: list[str],
         param: QueryParam,
-        *,
-        deduplicate_relations: bool = True,
-        deduplicate_chunks_in_batch: bool = False,
     ) -> dict[str, Any]:
-        """Run ordered graph queries, pruning branches through earlier root entities."""
+        """Run independent graph queries for the requested entities."""
 
         if param.mode != "graph":
             raise ValueError("aquery_data_batch only supports graph mode")
@@ -5162,10 +5158,6 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
         if not 0 <= param.graph_depth <= 5:
             raise ValueError("graph_depth must be between 0 and 5")
 
-        processed_roots: set[str] = set()
-        returned_unique_edges: set[tuple[str, str]] = set()
-        returned_relationships = 0
-        processed_chunks: set[str] = set()
         results: list[dict[str, Any]] = []
         successful = 0
 
@@ -5197,109 +5189,21 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
                 continue
 
             successful += 1
-            candidate_pairs = set(traversal.relations)
-            if deduplicate_relations:
-                # Earlier requested roots act as traversal barriers. This cuts
-                # a path such as E-B-C after B was processed, without removing
-                # E's own other branches (for example E-G and E-F), even when
-                # those relationships also appeared in B's result.
-                removed_relation_pairs = {
-                    pair
-                    for pair in candidate_pairs
-                    if pair[0] in processed_roots or pair[1] in processed_roots
-                }
-                available_relation_pairs = (
-                    candidate_pairs - removed_relation_pairs
-                )
-            else:
-                available_relation_pairs = candidate_pairs
-                removed_relation_pairs = set()
-
-            # Cutting a processed root can leave deeper candidate edges behind
-            # the barrier. Keep only the component still reachable from this
-            # request's root so every returned relationship has a valid path.
-            available_adjacency: dict[str, set[str]] = {}
-            for src_id, tgt_id in available_relation_pairs:
-                available_adjacency.setdefault(src_id, set()).add(tgt_id)
-                available_adjacency.setdefault(tgt_id, set()).add(src_id)
-            reachable_nodes = {root_entity}
-            pending_nodes = [root_entity]
-            while pending_nodes:
-                current_entity = pending_nodes.pop()
-                for neighbor in sorted(
-                    available_adjacency.get(current_entity, set()), reverse=True
-                ):
-                    if neighbor not in reachable_nodes:
-                        reachable_nodes.add(neighbor)
-                        pending_nodes.append(neighbor)
-            kept_relation_pairs = {
-                pair
-                for pair in available_relation_pairs
-                if pair[0] in reachable_nodes and pair[1] in reachable_nodes
-            }
-            skipped_disconnected_pairs = (
-                available_relation_pairs - kept_relation_pairs
-            )
-            returned_unique_edges.update(kept_relation_pairs)
-            returned_relationships += len(kept_relation_pairs)
-            processed_roots.add(root_entity)
-
-            kept_entity_names = {root_entity}
-            for src_id, tgt_id in kept_relation_pairs:
-                kept_entity_names.add(src_id)
-                kept_entity_names.add(tgt_id)
-
-            filtered_traversal = GraphTraversalResult(
-                root_entity=root_entity,
-                nodes={
-                    entity_name: node_data
-                    for entity_name, node_data in traversal.nodes.items()
-                    if entity_name in kept_entity_names
-                },
-                relations={
-                    pair: edge_data
-                    for pair, edge_data in traversal.relations.items()
-                    if pair in kept_relation_pairs
-                },
-                is_truncated=traversal.is_truncated,
-                node_depths={
-                    entity_name: depth
-                    for entity_name, depth in traversal.node_depths.items()
-                    if entity_name in kept_entity_names
-                },
-            )
             result = await _graph_raw_data_from_traversal(
                 requested_entity,
                 param.graph_depth,
-                filtered_traversal,
+                traversal,
                 self.text_chunks,
                 self.entity_chunks,
                 self.relation_chunks,
                 candidate_nodes=len(traversal.nodes),
                 candidate_relationships=len(traversal.relations),
-                deduplicated_relationships=[
-                    make_relation_chunk_key(*pair)
-                    for pair in sorted(removed_relation_pairs)
-                ],
-                exclude_chunk_ids=processed_chunks
-                if deduplicate_chunks_in_batch
-                else None,
             )
             result.setdefault("metadata", {}).update(
                 {
-                    "skipped_disconnected_relationships": [
-                        make_relation_chunk_key(*pair)
-                        for pair in sorted(skipped_disconnected_pairs)
-                    ],
-                    "skipped_disconnected_relationship_count": len(
-                        skipped_disconnected_pairs
-                    ),
+                    "skipped_disconnected_relationships": [],
+                    "skipped_disconnected_relationship_count": 0,
                 }
-            )
-            processed_chunks.update(
-                chunk["chunk_id"]
-                for chunk in result.get("data", {}).get("chunks", [])
-                if chunk.get("chunk_id")
             )
             results.append({"entity": requested_entity, "data": result})
 
@@ -5313,13 +5217,6 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
             "metadata": {
                 "requested_entities": len(entities),
                 "processed_entities": successful,
-                "processed_roots": sorted(processed_roots),
-                "returned_relationships": returned_relationships,
-                "unique_relationships": len(returned_unique_edges),
-                "repeated_relationships": (
-                    returned_relationships - len(returned_unique_edges)
-                ),
-                "unique_chunks": len(processed_chunks),
             },
         }
 

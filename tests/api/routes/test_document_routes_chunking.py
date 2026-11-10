@@ -1109,3 +1109,17 @@ def test_insert_text_allows_small_size_for_delimiter_only(monkeypatch):
     )
     assert resp.status_code == 200
     assert captured["chunking"].params["chunk_token_size"] == 50
+
+
+def test_managed_text_inherits_paragraph_default_and_explicit_request_overrides_it(
+    monkeypatch,
+):
+    monkeypatch.setenv("LIGHTRAG_MANAGED_BATCH_ID", "batch-unit")
+    monkeypatch.setenv("LIGHTRAG_BATCH_CHUNKING_STRATEGY", "paragraph_semantic")
+    monkeypatch.setenv("CHUNK_P_SIZE", "2000")
+    rag = SimpleNamespace(addon_params={"chunker": default_chunker_config()})
+    options, snapshot = _resolve_text_chunking(None, rag)
+    assert options == PROCESS_OPTION_CHUNK_PARAGRAH
+    assert snapshot["paragraph_semantic"]["chunk_token_size"] == 2000
+    options, _ = _resolve_text_chunking(TextChunkingConfig(strategy="fixed_token"), rag)
+    assert options == PROCESS_OPTION_CHUNK_FIXED

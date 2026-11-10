@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from scripts.qwen_vl_embedding_server import (
     EMBEDDING_DIM,
+    MAX_BATCH,
     MODEL_ID,
     EmbeddingRequest,
     format_response,
@@ -36,9 +37,14 @@ class EmbeddingServiceContractTests(unittest.TestCase):
         self.assertEqual(texts, ["text"])
         self.assertEqual(dimensions, EMBEDDING_DIM)
 
+        texts, _ = prepare_request(
+            EmbeddingRequest(model=MODEL_ID, input=["text"] * 32)
+        )
+        self.assertEqual(len(texts), 32)
+
         for payload in (
             {"model": "wrong", "input": "text"},
-            {"model": MODEL_ID, "input": ["x"] * 5},
+            {"model": MODEL_ID, "input": ["x"] * (MAX_BATCH + 1)},
             {"model": MODEL_ID, "input": [" "]},
         ):
             with self.subTest(payload=payload), self.assertRaises(HTTPException):

@@ -68,6 +68,29 @@ def test_explicit_start_freezes_unique_centers_and_retrieval_settings(client):
     )
 
 
+@pytest.mark.parametrize("count", [800, 1500, 1501, 2000])
+def test_all_selected_centers_reach_the_manager_without_truncation(client, count):
+    http, jobs = client
+    centers = [f"Entity {index}" for index in range(count)]
+    response = http.post(
+        "/batch-retrieval/jobs",
+        json={"centers": centers, "graph_depth": 1, "rag_top_k": 10},
+    )
+    assert response.status_code == 202
+    jobs.start.assert_awaited_once()
+    received, settings = jobs.start.call_args.args
+    assert received == centers
+    assert settings.graph_depth == 1 and settings.rag_top_k == 10
+
+
+def test_api_schema_has_no_fixed_batch_size_limit(client):
+    http, _ = client
+    schema = http.get("/openapi.json").json()
+    field = schema["components"]["schemas"]["BatchRequest"]["properties"]["centers"]
+    assert field["minItems"] == 1
+    assert "maxItems" not in field
+
+
 @pytest.mark.parametrize(
     "body",
     [
@@ -103,3 +126,34 @@ def test_all_artifacts_are_downloadable_and_incomplete_exports_are_refused(clien
     assert http.get("/batch-retrieval/jobs/batch-id/manifest.json").status_code == 200
     (jobs.root / "batch-id" / "manifest.json").unlink()
     assert http.get("/batch-retrieval/jobs/batch-id/packages.jsonl").status_code == 409
+
+
+def test_package_preview_pages_published_evidence_without_truncating_export(client):
+    import json
+
+    http, jobs = client
+    path = jobs.root / "batch-id" / "packages.jsonl"
+    rows = [
+        {
+            "schema_version": "enterprise-evidence/1.0",
+            "batch_id": "batch-id",
+            "workspace": "",
+            "entities": [],
+            "relationships": [],
+            "original_texts": [{"text": str(i)}],
+        }
+        for i in range(12)
+    ]
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    before = path.read_bytes()
+    first = http.get("/batch-retrieval/jobs/batch-id/preview?limit=10").json()
+    assert len(first["items"]) == 10 and first["has_more"]
+    second = http.get(
+        "/batch-retrieval/jobs/batch-id/preview?offset=10&limit=10"
+    ).json()
+    assert len(second["items"]) == 2 and not second["has_more"]
+    assert path.read_bytes() == before
+    assert http.get("/batch-retrieval/jobs/foreign/preview").status_code == 404
+    rows[0]["workspace"] = "foreign"
+    path.write_text(json.dumps(rows[0]) + "\n")
+    assert http.get("/batch-retrieval/jobs/batch-id/preview").status_code == 422

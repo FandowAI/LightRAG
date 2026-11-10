@@ -66,11 +66,11 @@ input:
 
 ### QA 配方与前端参数设置
 
-活动配方为 `/root/MasterRAG/config/data_workflow_job.yaml`，适配最新 `difficulty_routed_qa`，默认每来源最多3题、去重关闭。旧专家、评分与循环修订参数已移除。
+活动配方为 `/root/MasterRAG/config/data_workflow_job.yaml`，适配最新 `difficulty_routed_qa`，默认每来源最多3题。只支持当前配置格式；已删除 `deduplicate_qa` 和旧版本设置迁移逻辑，旧字段会被拒绝。历史任务快照不会修改。旧专家、评分与循环修订参数已移除。
 
 前端蒸馏设置提供流程/运行参数、模型档案、阶段/Prompt文件三个标签页。模型字段取自安装的 ModelConfig；四阶段为 scenario、qa、classification、inspection。Prompt 支持上传、预览、在线编辑，正文和配置统一存于 `/root/MasterRAG/config/`，新任务固定配置与模板副本，历史任务不改写。
 
-主题在 LightRAG 中不提供操作，下游必填要求按用户决定暂不处理；当前配方缺主题目录，真实运行仍会失败。保存设置不校验主题，也不调用模型。新版示例模型还需要对应腾讯及京东云凭据。
+主题采用上游随项目提供的默认18类 `categories` 目录，通过后端配方的 `topic_catalog_file` 引用受管副本，前端无需传入主题或路径。四阶段模板同步使用最新版 xinyi 模板，分类输出类别 id。保存设置会准备完整 workflow，校验目录、模板、解析器和模型引用，但不读取业务材料、不调用模型。模型调用仍需配置对应凭据。
 
 完整字段、存储布局、版本迁移和接口契约见 [蒸馏配置说明](/root/MasterRAG/config/DISTILLATION_CONFIGURATION.md)。旧 review_classifition 的 accepted 筛选与 export-review 不适用于新工作项。
 

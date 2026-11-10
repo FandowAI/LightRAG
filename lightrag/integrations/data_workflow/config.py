@@ -101,7 +101,11 @@ def load_settings(path: Path) -> BridgeSettings:
 
 
 def write_job_config(
-    template: Path, directory: Path, *, recipe: dict | None = None
+    template: Path,
+    directory: Path,
+    *,
+    recipe: dict | None = None,
+    config_root: Path | None = None,
 ) -> dict:
     """Snapshot the recipe, preserving the original base for Prompt resources."""
     document = read_yaml(template) if recipe is None else deepcopy(recipe)
@@ -126,8 +130,23 @@ def write_job_config(
         import hashlib
 
         snapshot_root = (
-            template.parent / "jobs" / directory.parent.name / directory.name
+            (config_root if config_root is not None else template.parent)
+            / "jobs"
+            / directory.parent.name
+            / directory.name
         )
+        parameters = document["workflow"]["parameters"]
+        if parameters.get("topic_catalog_file"):
+            catalog = (
+                template.parent / Path(parameters["topic_catalog_file"]).expanduser()
+            ).resolve()
+            content = catalog.read_text(encoding="utf-8")
+            digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            parameters["topic_catalog_file"] = str(
+                publish_text(
+                    snapshot_root / "topics", f"categories-{digest}.yaml", content
+                )
+            )
         for stage in ("scenario", "qa", "classification", "inspection"):
             task = document["workflow"]["parameters"].get(stage, {})
             if task.get("prompt_file"):
@@ -152,17 +171,28 @@ def write_job_config(
         directory,
         "job.yaml",
         yaml.safe_dump(document, allow_unicode=True, sort_keys=False),
+        config_root=config_root,
     )
     return document
 
 
 def write_config_snapshot(
-    template: Path, directory: Path, filename: str, content: str
+    template: Path,
+    directory: Path,
+    filename: str,
+    content: str,
+    *,
+    config_root: Path | None = None,
 ) -> None:
     """Keep configuration bytes under config/jobs; job artifact paths remain stable."""
     from .prompt_files import publish_text
 
-    root = template.parent / "jobs" / directory.parent.name / directory.name
+    root = (
+        (config_root if config_root is not None else template.parent)
+        / "jobs"
+        / directory.parent.name
+        / directory.name
+    )
     target = publish_text(root, filename, content)
     link = directory / filename
     if link.absolute() != target.absolute():

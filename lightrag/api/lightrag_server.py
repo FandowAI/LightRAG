@@ -10,7 +10,6 @@ from fastapi.openapi.docs import (
     get_swagger_ui_html,
     get_swagger_ui_oauth2_redirect_html,
 )
-import asyncio
 import json
 import os
 import re
@@ -38,6 +37,7 @@ from lightrag.api.utils_api import (
     internal_server_error,
 )
 from lightrag.api.admission_middleware import AdmissionMiddleware
+from lightrag.batch_control.writer_claim import guard_construction
 from lightrag.api.body_limit_middleware import BodyLimitMiddleware, resolve_body_limits
 from .config import (
     global_args,
@@ -99,7 +99,6 @@ from lightrag.kg.shared_storage import (
 )
 from lightrag import pipeline_metrics
 from lightrag.utils_pipeline import describe_doc_status_capabilities
-from fastapi.security import OAuth2PasswordRequestForm
 from lightrag.api.auth import auth_handler
 from lightrag.api.login_rate_limit import LoginRateLimiter
 
@@ -1440,6 +1439,7 @@ async def validation_exception_handler(
     )
 
 
+@guard_construction
 def create_app(args):
     # A server with no configured embedding model cannot protect its vectors.
     # The marker every vector backend records is what detects a swap to a
@@ -1649,68 +1649,86 @@ def create_app(args):
         """Lifespan context manager for startup and shutdown events"""
         # Store background tasks
         app.state.background_tasks = set()
+        batch_deployment = getattr(app.state, "batch_deployment", None)
 
-        try:
-            # Initialize database connections
-            # Note: initialize_storages() now auto-initializes pipeline_status for rag.workspace
-            await rag.initialize_storages()
-            if entity_merge is not None:
-                await entity_merge.initialize()
+        from contextlib import nullcontext
+        from lightrag.batch_control.writer_claim import WorkspaceClaim
 
-            # Data migration regardless of storage implementation
-            await rag.check_and_migrate_data()
+        claim = (
+            WorkspaceClaim.from_environment(args.working_dir, args.workspace)
+            if args.workers == 1
+            else nullcontext()
+        )
+        with claim:
+            app.state.workspace_claim = claim if args.workers == 1 else None
+            try:
+                # Initialize database connections
+                # Note: initialize_storages() now auto-initializes pipeline_status for rag.workspace
+                await rag.initialize_storages()
+                if entity_merge is not None:
+                    await entity_merge.initialize()
 
-            # Admission control needs a doc_status backend that can count
-            # strictly (LR2 §9.1). Probe once here so an unsupported backend
-            # fails at startup instead of turning every upload into a 503.
-            if getattr(rag, "max_pending_documents", 0) > 0:
-                from lightrag.utils_pipeline import count_active_documents
+                # Verify frozen canonical stores before migrations can change
+                # them. Only the owning worker sets this pre-lifespan marker.
+                if not getattr(app.state, "skip_migrations_for_verified_index", False):
+                    await rag.check_and_migrate_data()
 
-                try:
-                    active_now = await count_active_documents(rag.doc_status)
-                except Exception as admission_probe_error:
-                    raise RuntimeError(
-                        "MAX_PENDING_DOCUMENTS is set but the configured "
-                        f"doc_status backend cannot count strictly: "
-                        f"{admission_probe_error}"
-                    ) from admission_probe_error
-                logger.info(
-                    f"Admission control enabled: capacity "
-                    f"{rag.max_pending_documents}, {active_now} document(s) "
-                    "currently active"
+                # Admission control needs a doc_status backend that can count
+                # strictly (LR2 §9.1). Probe once here so an unsupported backend
+                # fails at startup instead of turning every upload into a 503.
+                if getattr(rag, "max_pending_documents", 0) > 0:
+                    from lightrag.utils_pipeline import count_active_documents
+
+                    try:
+                        active_now = await count_active_documents(rag.doc_status)
+                    except Exception as admission_probe_error:
+                        raise RuntimeError(
+                            "MAX_PENDING_DOCUMENTS is set but the configured "
+                            f"doc_status backend cannot count strictly: "
+                            f"{admission_probe_error}"
+                        ) from admission_probe_error
+                    logger.info(
+                        f"Admission control enabled: capacity "
+                        f"{rag.max_pending_documents}, {active_now} document(s) "
+                        "currently active"
+                    )
+
+                ASCIIColors.green("\nServer is ready to accept connections! 🚀\n")
+
+                if batch_deployment is not None:
+                    await batch_deployment.start()
+
+                yield
+
+            finally:
+                if batch_deployment is not None:
+                    await batch_deployment.close()
+                # Cancel and join all reserved background tasks FIRST, so each
+                # child's finally releases its reservation while shared state is
+                # still alive. Resists repeated cancellation; a deferred shutdown
+                # cancellation is re-raised only after storage/shared-state cleanup.
+                shutdown_cancel = await drain_reserved_background_tasks(
+                    app.state.background_tasks
                 )
 
-            ASCIIColors.green("\nServer is ready to accept connections! 🚀\n")
+                # Clean up database connections
+                if entity_merge is not None:
+                    await entity_merge.finalize()
+                await rag.finalize_storages()
 
-            yield
+                if "LIGHTRAG_GUNICORN_MODE" not in os.environ:
+                    # Only perform cleanup in Uvicorn single-process mode
+                    logger.debug("Uvicorn Mode: finalizing shared storage...")
+                    finalize_share_data()
+                else:
+                    # In Gunicorn mode with preload_app=True, cleanup is handled by on_exit hooks
+                    logger.debug(
+                        "Gunicorn Mode: postpone shared storage finalization to master process"
+                    )
 
-        finally:
-            # Cancel and join all reserved background tasks FIRST, so each
-            # child's finally releases its reservation while shared state is
-            # still alive. Resists repeated cancellation; a deferred shutdown
-            # cancellation is re-raised only after storage/shared-state cleanup.
-            shutdown_cancel = await drain_reserved_background_tasks(
-                app.state.background_tasks
-            )
-
-            # Clean up database connections
-            if entity_merge is not None:
-                await entity_merge.finalize()
-            await rag.finalize_storages()
-
-            if "LIGHTRAG_GUNICORN_MODE" not in os.environ:
-                # Only perform cleanup in Uvicorn single-process mode
-                logger.debug("Uvicorn Mode: finalizing shared storage...")
-                finalize_share_data()
-            else:
-                # In Gunicorn mode with preload_app=True, cleanup is handled by on_exit hooks
-                logger.debug(
-                    "Gunicorn Mode: postpone shared storage finalization to master process"
-                )
-
-            # Re-raise a shutdown cancellation only after all cleanup is done.
-            if shutdown_cancel is not None:
-                raise shutdown_cancel
+                # Re-raise a shutdown cancellation only after all cleanup is done.
+                if shutdown_cancel is not None:
+                    raise shutdown_cancel
 
     # Single switch for every interactive API documentation surface: /docs,
     # /docs/oauth2-redirect, /redoc, /openapi.json and the /static/swagger-ui
@@ -2594,6 +2612,16 @@ def create_app(args):
 
     _log_role_provider_options(rag)
 
+    # The isolated runtime supervisor observes the actual initialized instance.
+    app.state.rag = rag
+    from lightrag.batch_control.legacy import mount_legacy_adoption
+
+    mount_legacy_adoption(app, api_key, workers=args.workers)
+
+    from lightrag.batch_control.routes import install_batch_control
+
+    install_batch_control(app, api_key)
+
     entity_merge = None
     if (
         args.vector_storage == "MilvusVectorDBStorage"
@@ -2614,15 +2642,11 @@ def create_app(args):
     # routes stay at their natural paths and are prefixed by the proxy or uvicorn --root-path
     app.include_router(create_document_routes(rag, doc_manager, api_key))
     app.include_router(create_query_routes(rag, api_key, args.top_k))
-    app.include_router(
-        create_data_workflow_routes(
-            DataWorkflowService(
-                args.workspace,
-                batch_lookup=lambda batch_id: resolve_batch(rag, batch_id),
-            ),
-            api_key,
-        )
+    app.state.data_workflow_service = DataWorkflowService(
+        args.workspace,
+        batch_lookup=lambda batch_id: resolve_batch(rag, batch_id),
     )
+    app.include_router(create_data_workflow_routes(app.state.data_workflow_service, api_key))
     app.include_router(create_graph_routes(rag, api_key))
     if entity_merge is not None:
         app.include_router(
@@ -2735,148 +2759,22 @@ def create_app(args):
         else:
             return service_info_response(request)
 
-    # The verifier ignores WHITELIST_PATHS: its whole purpose is to report
-    # credential validity, and a whitelist entry covering it (e.g. "/auth/*")
-    # would otherwise turn it into an unconditional 200 while the protected
-    # routes still reject.
-    credential_verify_auth = get_combined_auth_dependency(
-        api_key, respect_whitelist=False
-    )
+    from lightrag.api.routers.session_routes import mount_session_routes
 
-    @app.get("/auth/verify", dependencies=[Depends(credential_verify_auth)])
-    async def verify_credentials():
-        """Verify that the caller's credentials satisfy the combined auth.
-
-        /health deliberately stays on the default whitelist as an
-        unauthenticated liveness probe, so it can never distinguish valid,
-        invalid and missing credentials. This endpoint ALWAYS runs the
-        combined dependency — WHITELIST_PATHS is deliberately ignored here —
-        so a missing or wrong X-API-Key fails with the standard 403 detail
-        ("API Key required" / "Invalid API Key"), which the WebUI's API-key
-        dialogs key on, while valid credentials get a trivial 200. No data is
-        exposed.
-        """
-        return {"status": "ok"}
-
-    @app.get("/auth-status")
-    async def get_auth_status():
-        """Get authentication status and guest token if auth is not configured"""
-
-        if not auth_handler.accounts:
-            # Authentication not configured, return guest token
-            guest_token = auth_handler.create_token(
-                username="guest", role="guest", metadata={"auth_mode": "disabled"}
-            )
-            return {
-                "auth_configured": False,
-                "access_token": guest_token,
-                "token_type": "bearer",
-                "auth_mode": "disabled",
-                "message": "Authentication is disabled. Using guest access.",
-                "core_version": core_version,
-                "api_version": api_version_display,
-                "webui_title": webui_title,
-                "webui_description": webui_description,
-                "ai_content_notice_enabled": ai_content_notice_enabled,
-            }
-
-        return {
-            "auth_configured": True,
-            "auth_mode": "enabled",
+    mount_session_routes(
+        app,
+        handler=auth_handler,
+        args=args,
+        api_key=api_key,
+        limiter_type=LoginRateLimiter,
+        metadata={
             "core_version": core_version,
             "api_version": api_version_display,
             "webui_title": webui_title,
             "webui_description": webui_description,
             "ai_content_notice_enabled": ai_content_notice_enabled,
-        }
-
-    # Brute-force protection for /login (CWE-307): throttle failed attempts per
-    # client IP + username. Checked before the bcrypt verification, so a locked
-    # key is also rejected without paying the bcrypt cost.
-    # getattr defaults keep create_app working for callers that build args
-    # programmatically (e.g. tests, embedding) without these newer fields.
-    login_rate_limiter = LoginRateLimiter(
-        max_attempts=getattr(args, "login_max_failed_attempts", 5),
-        window_seconds=getattr(args, "login_lockout_window_seconds", 300.0),
+        },
     )
-
-    @app.post("/login")
-    async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends()):
-        if not auth_handler.accounts:
-            # Authentication not configured, return guest token
-            guest_token = auth_handler.create_token(
-                username="guest", role="guest", metadata={"auth_mode": "disabled"}
-            )
-            return {
-                "access_token": guest_token,
-                "token_type": "bearer",
-                "auth_mode": "disabled",
-                "message": "Authentication is disabled. Using guest access.",
-                "core_version": core_version,
-                "api_version": api_version_display,
-                "webui_title": webui_title,
-                "webui_description": webui_description,
-                "ai_content_notice_enabled": ai_content_notice_enabled,
-            }
-        username = form_data.username
-        # Rate-limit key is client IP + username. X-Forwarded-For is NOT trusted
-        # (spoofable); behind a reverse proxy all clients may share the proxy IP,
-        # so buckets are separated by username to avoid one attacker locking out
-        # unrelated accounts. request.client can be None for some transports.
-        client_ip = request.client.host if request.client else "unknown"
-        rate_limit_key = f"{client_ip}:{username}"
-
-        retry_after = login_rate_limiter.retry_after(rate_limit_key)
-        if retry_after is not None:
-            raise HTTPException(
-                status_code=429,
-                detail="Too many failed login attempts. Please try again later.",
-                headers={"Retry-After": str(int(retry_after) + 1)},
-            )
-
-        # Reserve this attempt BEFORE the bcrypt await. verify runs on a worker
-        # thread, so without pre-reserving, many concurrent requests would all
-        # pass the check above before any resolved, bypassing the limit (TOCTOU).
-        # retry_after + reserve here are synchronous with no await between them,
-        # so the decision is consistent. The reservation is always released in
-        # the finally; only a confirmed wrong password becomes a real failure.
-        login_rate_limiter.reserve_attempt(rate_limit_key)
-        try:
-            # verify_password runs a CPU-bound bcrypt for every attempt (incl.
-            # unknown usernames, to equalize timing). Run it in a worker thread
-            # so a login flood cannot block the event loop and starve the whole
-            # API (unauthenticated DoS).
-            password_ok = await asyncio.to_thread(
-                auth_handler.verify_password, username, form_data.password
-            )
-            # Record the outcome BEFORE releasing the reservation, so the entry
-            # still carries the failure (release removes a now-idle entry).
-            if not password_ok:
-                # Confirmed failure -> count it (and emit the lockout alert only
-                # here, so a correct password on the Nth attempt never does).
-                login_rate_limiter.commit_failure(rate_limit_key)
-                raise HTTPException(status_code=401, detail="Incorrect credentials")
-            # Success clears the key's earlier failures.
-            login_rate_limiter.reset(rate_limit_key)
-        finally:
-            # Always drop the in-flight reservation (also frees the slot once the
-            # key is fully idle, e.g. after a successful login).
-            login_rate_limiter.release(rate_limit_key)
-
-        # Regular user login
-        user_token = auth_handler.create_token(
-            username=username, role="user", metadata={"auth_mode": "enabled"}
-        )
-        return {
-            "access_token": user_token,
-            "token_type": "bearer",
-            "auth_mode": "enabled",
-            "core_version": core_version,
-            "api_version": api_version_display,
-            "webui_title": webui_title,
-            "webui_description": webui_description,
-            "ai_content_notice_enabled": ai_content_notice_enabled,
-        }
 
     @app.get(
         "/health",

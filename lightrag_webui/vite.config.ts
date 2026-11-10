@@ -229,7 +229,8 @@ export default defineConfig(({ mode }) => {
         // server mount (/webui and /workspace).
         input: {
           index: path.resolve(import.meta.dirname, 'index.html'),
-          workspace: path.resolve(import.meta.dirname, 'workspace.html')
+          workspace: path.resolve(import.meta.dirname, 'workspace.html'),
+          batchSettings: path.resolve(import.meta.dirname, 'batch-settings.html')
         },
         // Let Vite handle chunking automatically to avoid circular dependency issues
         output: {

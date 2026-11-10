@@ -1,4 +1,4 @@
-"""Enterprise migration preserves knowledge and never merges on similarity alone."""
+"""Enterprise resolution uses score thresholds while preserving source-owned knowledge."""
 
 import asyncio
 import json
@@ -9,14 +9,14 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 
-from lightrag.enterprise_identity import IdentityRegistry, evidence_valid
+from lightrag.enterprise_identity import IdentityRegistry
 from lightrag.enterprise_knowledge import (
     metadata_for_graph,
     surviving_metadata,
     knowledge_context,
     remap_cached_fragments,
 )
-from lightrag.entity_merge import EntityMergeManager
+from lightrag.entity_merge import EntityMergeManager, EntityMergeSettings
 from lightrag.operate import _process_json_extraction_result
 
 pytestmark = pytest.mark.offline
@@ -61,14 +61,6 @@ class Vectors:
         pass
 
 
-class Chunks:
-    def __init__(self, values):
-        self.values = values
-
-    async def get_by_ids(self, ids):
-        return [self.values.get(key) for key in ids]
-
-
 def node(name="运营部", source="new", scope=None):
     return {
         "entity_name": name,
@@ -78,21 +70,6 @@ def node(name="运营部", source="new", scope=None):
         "file_path": "meeting.md",
         "identity_scope": scope or {"brand": "甲品牌"},
     }
-
-
-def judgment(decision="same", confidence=0.99):
-    return json.dumps(
-        {
-            "decision": decision,
-            "candidate": "运营部",
-            "confidence": confidence,
-            "reason": "Both original passages identify the same department and brand",
-            "evidence": {
-                "incoming": {"chunk_id": "new", "quote": CURRENT},
-                "candidate": {"chunk_id": "old", "quote": HISTORY},
-            },
-        }
-    )
 
 
 @pytest.fixture
@@ -106,8 +83,18 @@ def manager(tmp_path, monkeypatch):
         chunk_entity_relation_graph=Graph(
             {"运营部": {**node(source="old"), "description": HISTORY}}
         ),
-        role_llm_funcs={"extract": AsyncMock(return_value=judgment())},
-        text_chunks=Chunks({"new": {"content": CURRENT}, "old": {"content": HISTORY}}),
+        role_llm_funcs={
+            "extract": AsyncMock(
+                side_effect=AssertionError("Identity resolution must not call an LLM")
+            )
+        },
+        text_chunks=SimpleNamespace(
+            get_by_ids=AsyncMock(
+                side_effect=AssertionError(
+                    "Similarity resolution must not read evidence chunks"
+                )
+            )
+        ),
     )
     result = EntityMergeManager(rag, str(tmp_path), "test")
     result.name_vdb.hits = [
@@ -126,96 +113,120 @@ def results(name="运营中心", scope=None):
 
 
 @pytest.mark.asyncio
-async def test_similarity_only_proposes_and_original_evidence_authorizes_merge(manager):
-    output, decisions = await manager.resolve(results())
-    assert "运营部" in output[0][0]
-    assert decisions[0]["reason"] == "identity_verified"
-    assert ("工具", "运营部") in output[0][1]
-    manager.rag.role_llm_funcs["extract"].assert_awaited_once()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("decision", ["different", "related", "uncertain"])
-async def test_non_same_keeps_original_objects_and_knowledge(manager, decision):
-    manager.rag.role_llm_funcs["extract"].return_value = judgment(decision)
+async def test_similarity_merges_without_llm_and_preserves_knowledge(manager):
     data = results()
     data[0][0]["运营中心"][0]["knowledge_records"] = [
         {"内容": "先验证再扩张", "执行状态": "计划"}
     ]
     output, decisions = await manager.resolve(data)
-    assert "运营中心" in output[0][0]
-    assert (
-        output[0][0]["运营中心"][0]["knowledge_records"]
-        == data[0][0]["运营中心"][0]["knowledge_records"]
-    )
-    assert decisions[0]["reason"] == "separate_uncertain"
+    assert "运营部" in output[0][0]
+    assert ("工具", "运营部") in output[0][1]
+    row = output[0][0]["运营部"][0]
+    assert row["source_id"] == "new"
+    assert row["knowledge_records"] == data[0][0]["运营中心"][0]["knowledge_records"]
+    assert row["_resolution_aliases"][0]["name"] == "运营中心"
+    assert decisions[0]["reason"] == "merged"
+    assert decisions[0]["best_score"] == 0.99
+    assert decisions[0]["judgment"] is None
+    manager.rag.role_llm_funcs["extract"].assert_not_awaited()
+    manager.rag.text_chunks.get_by_ids.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_different_brand_blocks_same_name_before_model(manager):
+@pytest.mark.parametrize(
+    ("scores", "reason"),
+    [
+        ([0.89], "below_threshold"),
+        ([0.94, 0.92], "ambiguous_margin"),
+        ([0.91, 0.87], "ambiguous_margin"),
+    ],
+)
+async def test_similarity_threshold_and_margin_keep_uncertain_candidates_separate(
+    manager, scores, reason
+):
+    manager.name_vdb.hits = []
+    for index, score in enumerate(scores):
+        name = f"候选部门{index}"
+        manager.rag.chunk_entity_relation_graph.nodes[name] = node(name, source="old")
+        manager.name_vdb.hits.append(
+            {"entity_name": name, "entity_type": "组织与部门", "distance": score}
+        )
+    output, decisions = await manager.resolve(results())
+    assert "运营中心" in output[0][0]
+    assert decisions[0]["reason"] == reason
+    assert decisions[0]["best_score"] == scores[0]
+    assert decisions[0]["runner_up_score"] == (scores[1] if len(scores) > 1 else None)
+    manager.rag.role_llm_funcs["extract"].assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_similarity_uses_saved_workspace_settings(manager):
+    manager.save(0, EntityMergeSettings(similarity_threshold=0.76))
+    manager.name_vdb.hits[0]["distance"] = 0.8
+    output, decisions = await manager.resolve(results())
+    assert "运营部" in output[0][0]
+    assert decisions[0]["reason"] == "merged"
+
+
+@pytest.mark.asyncio
+async def test_different_brand_blocks_same_name_and_preserves_stable_separation(
+    manager,
+):
     data = [({"运营部": [node(scope={"brand": "乙品牌"})]}, {})]
     output, decisions = await manager.resolve(data)
+    repeated, _ = await manager.resolve(data)
     names = list(output[0][0])
     assert len(names) == 1 and names[0].startswith("运营部 [")
+    assert names == list(repeated[0][0])
     assert decisions[0]["reason"] == "separate_scope"
     manager.rag.role_llm_funcs["extract"].assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_uncertain_same_name_is_stable_and_preserves_both_entities(manager):
-    manager.rag.role_llm_funcs["extract"].return_value = judgment("uncertain")
-    data = [({"运营部": [node()]}, {})]
-    a, _ = await manager.resolve(data)
-    b, _ = await manager.resolve(data)
-    assert list(a[0][0]) == list(b[0][0])
-    assert "运营部" not in a[0][0]
-    assert "运营部" in manager.rag.chunk_entity_relation_graph.nodes
+async def test_same_name_and_scope_merge_without_identity_model(manager):
+    manager.name_vdb.hits = []
+    output, decisions = await manager.resolve([({"运营部": [node()]}, {})])
+    assert list(output[0][0]) == ["运营部"]
+    assert decisions[0]["reason"] == "merged"
+    assert decisions[0]["best_score"] == 1.0
+    manager.rag.role_llm_funcs["extract"].assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_invalid_quote_and_high_confidence_cannot_merge(manager):
-    value = json.loads(judgment())
-    value["evidence"]["candidate"]["quote"] = (
-        "This quote is not present in any original source"
-    )
-    manager.rag.role_llm_funcs["extract"].return_value = json.dumps(value)
-    output, _ = await manager.resolve(results())
-    assert "运营中心" in output[0][0]
-    assert manager.rag.role_llm_funcs["extract"].await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_second_check_can_confirm_a_low_confidence_first_same(manager):
-    manager.rag.role_llm_funcs["extract"].side_effect = [
-        judgment(confidence=0.8),
-        judgment(),
-    ]
+async def test_similarity_works_without_model_or_original_chunk_store(manager):
+    manager.rag.role_llm_funcs = {}
+    del manager.rag.text_chunks
     output, _ = await manager.resolve(results())
     assert "运营部" in output[0][0]
-    assert manager.rag.role_llm_funcs["extract"].await_count == 2
 
 
 @pytest.mark.asyncio
-async def test_unavailable_model_keeps_content_and_does_not_invent_identity(manager):
-    manager.rag.role_llm_funcs["extract"].side_effect = TimeoutError("offline")
+async def test_disabling_similarity_keeps_new_name_separate(manager):
+    manager.save(0, EntityMergeSettings(enabled=False))
     output, decisions = await manager.resolve(results())
     assert "运营中心" in output[0][0]
-    assert "unavailable" in decisions[0]["judgment"]["reason"]
-
-
-@pytest.mark.asyncio
-async def test_cancelled_identity_propagates_cancellation(manager):
-    manager.rag.role_llm_funcs["extract"].side_effect = asyncio.CancelledError()
-    with pytest.raises(asyncio.CancelledError):
-        await manager.resolve(results())
-
-
-@pytest.mark.asyncio
-async def test_no_original_chunks_never_uses_model_summary_as_proof(manager):
-    manager.rag.text_chunks.values.clear()
-    output, _ = await manager.resolve(results())
-    assert "运营中心" in output[0][0]
+    assert decisions[0]["reason"] == "new"
     manager.rag.role_llm_funcs["extract"].assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("candidate_type", [None, "人物"])
+async def test_stale_or_wrong_type_vector_hit_cannot_merge(manager, candidate_type):
+    graph = manager.rag.chunk_entity_relation_graph
+    if candidate_type is None:
+        graph.nodes.clear()
+    else:
+        graph.nodes["运营部"]["entity_type"] = candidate_type
+    output, decisions = await manager.resolve(results())
+    assert "运营中心" in output[0][0]
+    assert decisions[0]["reason"] == "new"
+
+
+def test_snapshot_reports_similarity_mode_without_model_verification(manager):
+    mode = manager.snapshot()["identity_verification"]
+    assert mode["enabled"] is False
+    assert mode["method"] == "vector_similarity"
+    assert mode["registry"] is not None
 
 
 @pytest.mark.asyncio
@@ -304,9 +315,9 @@ async def test_verified_roster_renames_without_model_and_retains_historic_title(
 
 
 @pytest.mark.asyncio
-async def test_preview_reports_candidates_instead_of_claiming_a_merge(manager):
+async def test_preview_selects_similar_candidate_without_model(manager):
     value = await manager.preview("运营中心", "组织与部门")
-    assert value["decision"] == "candidate" and value["target"] is None
+    assert value["decision"] == "merge" and value["target"] == "运营部"
     manager.rag.role_llm_funcs["extract"].assert_not_awaited()
 
 
@@ -403,26 +414,6 @@ def test_versioned_profile_has_no_review_queue_and_keeps_field_adapter():
     assert "needs_review" not in guidance
     assert "完整知识" in guidance and "事实记录" in guidance
     assert "不强行合并" in guidance
-
-
-@pytest.mark.parametrize(
-    "proof",
-    [
-        None,
-        {},
-        {"incoming": {"quote": "missing"}},
-        {
-            "incoming": {"quote": CURRENT, "chunk_id": "invented"},
-            "candidate": {"quote": HISTORY, "chunk_id": "old"},
-        },
-    ],
-)
-def test_model_cannot_invent_original_source_evidence(proof):
-    assert not evidence_valid(
-        proof,
-        [{"chunk_id": "new", "text": CURRENT}],
-        [{"chunk_id": "old", "text": HISTORY}],
-    )
 
 
 @pytest.mark.asyncio

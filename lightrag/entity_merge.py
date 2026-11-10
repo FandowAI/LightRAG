@@ -90,7 +90,8 @@ class EntityMergeManager:
         )
         return {
             "identity_verification": {
-                "enabled": bool(getattr(self, "enterprise", None)),
+                "enabled": False,
+                "method": "vector_similarity",
                 "uncertain_policy": "keep_separate",
                 "registry": self.enterprise.registry.public_snapshot() if getattr(self, "enterprise", None) else None,
             },
@@ -194,10 +195,6 @@ class EntityMergeManager:
         if not name.strip() or not self._type(entity_type):
             raise ValueError("A non-empty name and valid entity type are required")
         existing = await self.rag.chunk_entity_relation_graph.get_node(name)
-        if getattr(self, "enterprise", None):
-            candidates = await self.candidates(name, entity_type, settings)
-            return {"existing_exact_name": bool(existing), "candidates": candidates,
-                    "decision": "candidate", "target": None}
         candidates = (
             [] if existing else await self.candidates(name, entity_type, settings)
         )

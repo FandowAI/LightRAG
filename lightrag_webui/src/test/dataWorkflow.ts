@@ -44,7 +44,6 @@ export function recipeSettingsFixture(): workflowApi.RecipeSettingsSnapshot {
     workflow_name: 'difficulty_routed_qa',
     settings: {
       questions_per_source: 3,
-      deduplicate_qa: false,
       scenario_instructions: 'Synthetic scenarios',
       classification_instructions: 'Classify importance and difficulty',
       batch_size: 1,

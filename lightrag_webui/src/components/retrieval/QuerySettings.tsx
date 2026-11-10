@@ -16,7 +16,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip'
 import { useSettingsStore } from '@/stores/settings'
 import { useQuerySettingsStore } from '@/stores/querySettings'
-import type { QuerySettings as QuerySettingsValues } from '@/stores/querySettings'
+import type { QuerySettings as QuerySettingsValues, QuerySettingsStore } from '@/stores/querySettings'
 import { useTranslation } from 'react-i18next'
 import { CircleHelp, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -41,10 +41,13 @@ const ResetButton = ({ onClick, title }: { onClick: () => void; title: string })
   </TooltipProvider>
 )
 
-export default function QuerySettings() {
+export default function QuerySettings({ store = useQuerySettingsStore }: { store?: QuerySettingsStore } = {}) {
   const { t } = useTranslation()
-  const querySettings = useQuerySettingsStore((state) => state.querySettings)
-  const userPromptHistory = useSettingsStore((state) => state.userPromptHistory)
+  const querySettings = store((state) => state.querySettings)
+  const globalPromptHistory = useSettingsStore((state) => state.userPromptHistory)
+  const batchPromptHistory = store((state) => state.userPromptHistory)
+  const scoped = store !== useQuerySettingsStore
+  const userPromptHistory = scoped ? batchPromptHistory : globalPromptHistory
   const [scopeHelpOpen, setScopeHelpOpen] = useState(false)
   // What the tooltip's state was when the tap STARTED. Radix dismisses an open
   // tooltip from a document-level pointerdown listener, so by the time the
@@ -53,8 +56,8 @@ export default function QuerySettings() {
   const scopeHelpOpenAtPointerDown = useRef(false)
 
   const handleChange = useCallback((key: keyof QuerySettingsValues, value: any) => {
-    useQuerySettingsStore.getState().updateQuerySettings({ [key]: value })
-  }, [])
+    store.getState().updateQuerySettings({ [key]: value })
+  }, [store])
 
   const handleSelectFromHistory = useCallback((prompt: string) => {
     handleChange('user_prompt', prompt)
@@ -63,8 +66,9 @@ export default function QuerySettings() {
   const handleDeleteFromHistory = useCallback((index: number) => {
     const newHistory = [...userPromptHistory]
     newHistory.splice(index, 1)
-    useSettingsStore.getState().setUserPromptHistory(newHistory)
-  }, [userPromptHistory])
+    if (scoped) store.getState().setUserPromptHistory(newHistory)
+    else useSettingsStore.getState().setUserPromptHistory(newHistory)
+  }, [userPromptHistory, scoped, store])
 
   // Default values for reset functionality
   const defaultValues = useMemo(() => ({
@@ -100,7 +104,7 @@ export default function QuerySettings() {
           {/* One line, always: a longer translation is ellipsized rather than
               pushing the panel's controls down. The full text is in the tooltip. */}
           <span className="min-w-0 truncate">
-            {t('retrievePanel.querySettings.parametersScopeNotice')}
+            {t(scoped ? 'batchWorkbench.queryScope' : 'retrievePanel.querySettings.parametersScopeNotice')}
           </span>
           <TooltipProvider>
             <Tooltip open={scopeHelpOpen} onOpenChange={setScopeHelpOpen}>
@@ -122,7 +126,7 @@ export default function QuerySettings() {
                 </button>
               </TooltipTrigger>
               <TooltipContent side="left" className="max-w-[min(20rem,calc(100vw-2rem))]">
-                {t('retrievePanel.querySettings.parametersScopeTooltip')}
+                {t(scoped ? 'batchWorkbench.queryScopeHelp' : 'retrievePanel.querySettings.parametersScopeTooltip')}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>

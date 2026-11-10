@@ -11,14 +11,13 @@ from lightrag.constants import GRAPH_FIELD_SEP
 from lightrag.enterprise_identity import (
     IdentityRegistry,
     compatible,
-    judge_identity,
     normalize_name,
 )
 from lightrag.enterprise_knowledge import alias_rows, identity_scope
 
 
 class EnterpriseResolver:
-    """Use indexed aliases and the name VDB, then verify identity before anchors."""
+    """Resolve typed, scope-compatible candidates by score before writing anchors."""
 
     def __init__(self, manager):
         self.manager = manager
@@ -141,7 +140,8 @@ class EnterpriseResolver:
             node["identity_scope"] = self.registry.normalize_scope(node)
             registered = self.registry.match(name, node)
             target, target_kind = None, kind
-            reason, judgment = "new", None
+            reason = "new"
+            ranked = []
             if registered:
                 canonical = registered["canonical_name"]
                 existing = await get_node(canonical)
@@ -204,22 +204,21 @@ class EnterpriseResolver:
                             "score": 1.0,
                         }
                 for hit in await self.manager.candidates(name, kind, settings):
-                    if hit["score"] < settings.similarity_threshold:
-                        continue
                     candidate = await get_node(hit["name"])
                     if candidate:
                         candidates.setdefault(hit["name"], {**hit, "node": candidate})
-                accepted = [
-                    c for c in candidates.values() if compatible(node, c["node"])
-                ]
-                if accepted:
-                    target, judgment = await judge_identity(
-                        self.rag,
-                        name,
-                        node,
-                        sorted(accepted, key=lambda c: (-c["score"], c["name"])),
-                    )
-                    reason = "identity_verified" if target else "separate_uncertain"
+                ranked = sorted(
+                    (c for c in candidates.values() if compatible(node, c["node"])),
+                    key=lambda c: (-c["score"], c["name"]),
+                )
+                if ranked:
+                    target = self.manager._select(ranked, settings)
+                    if target:
+                        reason = "merged"
+                    elif ranked[0]["score"] < settings.similarity_threshold:
+                        reason = "below_threshold"
+                    else:
+                        reason = "ambiguous_margin"
                 elif candidates:
                     reason = "separate_scope"
             if target is None:
@@ -250,7 +249,9 @@ class EnterpriseResolver:
                     "source": name,
                     "target": target,
                     "reason": reason,
-                    "judgment": judgment,
+                    "judgment": None,
+                    "best_score": ranked[0]["score"] if ranked else None,
+                    "runner_up_score": ranked[1]["score"] if len(ranked) > 1 else None,
                     "registry_sha256": self.registry.digest,
                 }
             )

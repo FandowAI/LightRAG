@@ -9,6 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from lightrag.api.utils_api import get_combined_auth_dependency
+from fastapi.responses import FileResponse
+
 from lightrag.integrations.data_workflow.contracts import (
     JobListResponse,
     JobResponse,
@@ -194,5 +196,20 @@ def create_data_workflow_routes(
         limit: int = Query(8192, ge=4, le=65536),
     ):
         return invoke(lambda: service.logs(job_id, stream, offset, limit))
+
+    @router.get("/jobs/{job_id}/results", dependencies=[Depends(auth)])
+    def results(
+        job_id: str, offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100)
+    ):
+        return invoke(lambda: service.result_preview(job_id, offset, limit))
+
+    @router.get("/jobs/{job_id}/files/{artifact}", dependencies=[Depends(auth)])
+    def download(job_id: str, artifact: Literal["review", "stdout", "stderr"]):
+        path = invoke(lambda: service.artifact_file(job_id, artifact))
+        return FileResponse(
+            path,
+            filename=path.name,
+            media_type="application/x-ndjson" if artifact == "review" else "text/plain",
+        )
 
     return router

@@ -3140,10 +3140,16 @@ async def test_reprocess_starts_managed_task(tmp_path):
     ][-1]
 
     managed: set = set()
-    response = await reprocess_endpoint(managed)
+    response = await reprocess_endpoint(
+        managed,
+        _document_routes.ReprocessFailedRequest(doc_ids=["doc-1"]),
+    )
     assert response.status == "reprocessing_started"
     # The pipeline pass is a live managed task (start barrier confirmed takeover).
     assert len(managed) == 1
+
+    ingress = await shared_storage.get_pipeline_ingress(rag.workspace)
+    assert ingress.snapshot_manual_retries()[0].retry_doc_ids == ("doc-1",)
 
     gate.set()
     await _await_managed(managed)

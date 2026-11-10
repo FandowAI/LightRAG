@@ -11,7 +11,14 @@ from pathlib import Path
 from .config import BridgeSettings, read_yaml
 
 
-def execute(settings: BridgeSettings, directory: Path) -> dict:
+def execute(
+    settings: BridgeSettings,
+    directory: Path,
+    *,
+    cancel_requested=None,
+    child_environment=None,
+    command_wrapper=None,
+) -> dict:
     """Accept completion only when the CLI's receipt agrees with its exit status."""
     recipe = read_yaml(directory / "job.yaml")
     validate_execution(settings, recipe)
@@ -27,7 +34,11 @@ def execute(settings: BridgeSettings, directory: Path) -> dict:
         if not settings.credentials_file.is_file():
             raise ValueError("Configured credentials_file does not exist")
         command.extend(["--env-file", str(settings.credentials_file)])
-    environment = dict(os.environ)
+    if command_wrapper is not None:
+        command = [command[0], *command_wrapper, *command[1:]]
+    environment = (
+        dict(os.environ) if child_environment is None else dict(child_environment)
+    )
     # Import the selected checkout, never an unrelated installed copy or LightRAG's path.
     environment["PYTHONPATH"] = str(settings.project_directory / "src")
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -45,7 +56,28 @@ def execute(settings: BridgeSettings, directory: Path) -> dict:
             start_new_session=True,
         )
         try:
-            code = process.wait(timeout=settings.limits.timeout_seconds)
+            if cancel_requested is None:
+                code = process.wait(timeout=settings.limits.timeout_seconds)
+            else:
+                import time
+
+                deadline = (
+                    None
+                    if settings.limits.timeout_seconds is None
+                    else time.monotonic() + settings.limits.timeout_seconds
+                )
+                while True:
+                    if cancel_requested():
+                        raise InterruptedError("Workflow task cancellation requested")
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise subprocess.TimeoutExpired(
+                            command, settings.limits.timeout_seconds
+                        )
+                    try:
+                        code = process.wait(timeout=0.25)
+                        break
+                    except subprocess.TimeoutExpired:
+                        pass
         except BaseException:
             if process.poll() is None:
                 os.killpg(process.pid, signal.SIGTERM)

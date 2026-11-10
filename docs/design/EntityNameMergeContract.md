@@ -2,11 +2,13 @@
 
 This optional overlay is active for the server's Neo4j + Milvus configuration. It does not change the ordinary entity vector collection or query behavior. Settings are stored per workspace in `entity_merge_settings.sqlite3` under `WORKING_DIR`; the separate Milvus collection is `<workspace>_name_entities_<embedding-model>_<dimension>d`.
 
-When `ENTERPRISE_KNOWLEDGE_ENABLED=true`, the evidence-based enterprise overlay
-replaces the score-based decision below. See
-[EnterpriseKnowledgeMigration.md](EnterpriseKnowledgeMigration.md) for verified
-glossary rules, original-source checks, uncertainty retention, and alias lifecycle.
-The locking, journal, and name-index publication contracts still apply.
+When `ENTERPRISE_KNOWLEDGE_ENABLED=true`, the enterprise overlay keeps verified
+glossary mappings, explicit scope checks, and indexed aliases, then selects
+candidates using the same similarity and margin thresholds. It does not call an
+LLM to verify identity. See
+[EnterpriseKnowledgeMigration.md](EnterpriseKnowledgeMigration.md) for the
+enterprise selection rules and alias lifecycle. The locking, journal, and
+name-index publication contracts still apply.
 
 ## Legacy decision (enterprise overlay disabled)
 

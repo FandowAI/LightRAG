@@ -327,3 +327,50 @@ async def test_prompt_endpoints_use_authenticated_workspace_service(client):
             headers={"X-API-Key": "wrong"},
         )
     ).status_code == 403
+
+
+async def test_results_and_download_are_authenticated_and_scoped_by_job(
+    client, tmp_path
+):
+    http, service = client
+    service.result_preview.return_value = {
+        "items": [],
+        "offset": 20,
+        "next_offset": 20,
+        "has_more": False,
+    }
+    response = await http.get(
+        "/integrations/data-work-flow/jobs/distill-1/results?offset=20&limit=20"
+    )
+    assert response.status_code == 200 and response.json()["offset"] == 20
+    service.result_preview.assert_called_once_with("distill-1", 20, 20)
+    review = tmp_path / "review.jsonl"
+    review.write_text('{"official":"unchanged"}\n')
+    service.artifact_file.return_value = review
+    response = await http.get(
+        "/integrations/data-work-flow/jobs/distill-1/files/review"
+    )
+    assert response.status_code == 200 and response.content == review.read_bytes()
+    service.artifact_file.assert_called_once_with("distill-1", "review")
+    for suffix in ["results", "files/review"]:
+        response = await http.get(
+            "/integrations/data-work-flow/jobs/distill-1/" + suffix,
+            headers={"X-API-Key": "wrong"},
+        )
+        assert response.status_code == 403
+    service.result_preview.side_effect = KeyError("foreign")
+    assert (
+        await http.get("/integrations/data-work-flow/jobs/foreign/results")
+    ).status_code == 404
+
+
+@pytest.mark.parametrize(
+    "suffix", ["results?offset=-1", "results?limit=101", "files/config"]
+)
+async def test_result_query_validation_rejects_invalid_requests(client, suffix):
+    http, service = client
+    assert (
+        await http.get("/integrations/data-work-flow/jobs/distill-1/" + suffix)
+    ).status_code == 422
+    service.result_preview.assert_not_called()
+    service.artifact_file.assert_not_called()

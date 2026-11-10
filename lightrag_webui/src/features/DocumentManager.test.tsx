@@ -25,7 +25,7 @@
  * documentDeletionProbe.test.ts.
  */
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { cleanup, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import {
@@ -81,7 +81,9 @@ const backend = {
   recordFilters: false,
   paginatedCalls: 0,
   healthCalls: 0,
-  deleteCalls: 0
+  deleteCalls: 0,
+  retryCalls: [] as string[][],
+  cancelCalls: 0
 }
 
 const resetBackend = () => {
@@ -97,6 +99,8 @@ const resetBackend = () => {
   backend.paginatedCalls = 0
   backend.healthCalls = 0
   backend.deleteCalls = 0
+  backend.retryCalls = []
+  backend.cancelCalls = 0
 }
 
 const paginate = (statusFilter: string | null): PaginatedDocsResponse => {
@@ -170,6 +174,18 @@ const backendAdapter = async (config: any) => {
     })
   }
 
+  if (url.endsWith('/documents/reprocess_failed')) {
+    const docIds: string[] = JSON.parse(config.data ?? '{}').doc_ids ?? []
+    backend.retryCalls.push(docIds)
+    return respond(config, { status: 'reprocessing_started', message: 'retry started', track_id: '' })
+  }
+
+  if (url.endsWith('/documents/cancel_pipeline')) {
+    backend.cancelCalls += 1
+    return respond(config, { status: 'cancellation_requested', message: 'cancel requested' })
+  }
+
+
   return respond(config, {})
 }
 
@@ -215,6 +231,80 @@ describe('DocumentManager post-action refreshes', () => {
   afterAll(() => {
     __setAxiosAdapterForTests(undefined)
   })
+
+  test(
+    'retries only selected failed documents',
+    async () => {
+      const user = userEvent.setup()
+      renderWithProviders(<DocumentManager />)
+
+      await waitFor(() => {
+        expect(rowFor(DOC_ID) === null).toBe(false)
+      })
+
+      await user.click(screen.getByRole('button', { name: /^Failed/ }))
+      await waitFor(() => {
+        expect(rowFor(FAILED_ID) === null).toBe(false)
+      })
+      const row = rowFor(FAILED_ID)
+      await user.click(within(row as HTMLElement).getByRole('checkbox'))
+      await user.click(screen.getByRole('button', { name: 'Retry Failed (1)' }))
+
+      await waitFor(() => {
+        expect(backend.retryCalls).toEqual([[FAILED_ID]])
+      })
+    },
+    10000,
+  )
+
+  test(
+    'shows an action to retry all failed documents without selecting rows',
+    async () => {
+      const user = userEvent.setup()
+      renderWithProviders(<DocumentManager />)
+
+      await waitFor(() => {
+        expect(rowFor(DOC_ID) === null).toBe(false)
+      })
+
+      await user.click(screen.getByRole('button', { name: /^Failed/ }))
+      await waitFor(() => {
+        expect(rowFor(FAILED_ID) === null).toBe(false)
+      })
+      await user.click(screen.getByRole('button', { name: 'Retry All Failed (1)' }))
+
+      await waitFor(() => {
+        expect(backend.retryCalls).toEqual([[]])
+      })
+    },
+    10000,
+  )
+
+  test(
+    'shows a direct pipeline stop action while processing is busy',
+    async () => {
+      const user = userEvent.setup()
+      renderWithProviders(<DocumentManager />)
+
+      await waitFor(() => {
+        expect(rowFor(DOC_ID) === null).toBe(false)
+      })
+      act(() => {
+        useBackendState.setState({ pipelineBusy: true })
+      })
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Cancel' }) === null).toBe(false)
+      })
+      await user.click(screen.getByRole('button', { name: 'Cancel' }))
+      await user.click(screen.getByRole('button', { name: 'Confirm Cancellation' }))
+
+      await waitFor(() => {
+        expect(backend.cancelCalls).toBe(1)
+      })
+    },
+    10000,
+  )
+
 
   test(
     'a deletion that commits before the first health check still drops the row',

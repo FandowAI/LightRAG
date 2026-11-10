@@ -90,7 +90,22 @@ def run(store: JobStore, job_id: str, operation: str) -> None:
         store.update(
             job_id, status="running", phase="processing", started_at=timestamp()
         )
-        receipt = execute(settings, directory)
+        quota = directory / "provider-admission.json"
+        if quota.is_file():
+            from lightrag.batch_control.provider_quota import bootstrap
+
+            receipt = execute(
+                settings,
+                directory,
+                command_wrapper=[
+                    str(Path(bootstrap.__file__)),
+                    "--spec",
+                    str(quota),
+                    "--",
+                ],
+            )
+        else:
+            receipt = execute(settings, directory)
         store.update(
             job_id,
             status=receipt["status"],

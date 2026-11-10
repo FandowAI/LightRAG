@@ -1,4 +1,4 @@
-import { create } from 'zustand'
+import { create, type UseBoundStore, type StoreApi } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { createSelectors } from '@/lib/utils'
 import { QUERY_SETTINGS_STORAGE_KEY } from '@/lib/storageKeys'
@@ -19,16 +19,23 @@ import type { QueryRequest } from '@/api/lightrag'
  * re-hydrating on `storage` events (see the workspace bootstrap). Keeping
  * the settings in their own key removes the whole-envelope write-back race
  * that used to let one entry's writes clobber the other's saved parameters.
+ * Batch workbenches inject separate stores keyed by user and batch; their
+ * prompt histories never write the original workspace's settings envelope.
  */
 
 export type QuerySettings = Omit<QueryRequest, 'query'> & {
   structured_context?: boolean
 }
 
-interface QuerySettingsState {
+export interface QuerySettingsState {
   querySettings: QuerySettings
   updateQuerySettings: (settings: Partial<QuerySettings>) => void
+  userPromptHistory: string[]
+  setUserPromptHistory: (history: string[]) => void
+  addUserPromptToHistory: (prompt: string) => void
 }
+
+export type QuerySettingsStore = UseBoundStore<StoreApi<QuerySettingsState>>
 
 export const defaultQuerySettings: QuerySettings = {
   mode: 'mix',
@@ -48,10 +55,17 @@ export const defaultQuerySettings: QuerySettings = {
   enable_rerank: true
 }
 
-const useQuerySettingsStoreBase = create<QuerySettingsState>()(
+export const createQuerySettingsStore = (key: string, defaults: Partial<QuerySettings> = {}) => create<QuerySettingsState>()(
   persist(
     (set) => ({
-      querySettings: { ...defaultQuerySettings },
+      querySettings: { ...defaultQuerySettings, ...defaults, history_turns: 0 },
+      userPromptHistory: [],
+      setUserPromptHistory: (history) => set({ userPromptHistory: history }),
+      addUserPromptToHistory: (prompt) => {
+        const value = prompt.trim()
+        if (!value) return
+        set((state) => ({ userPromptHistory: [value, ...state.userPromptHistory.filter((item) => item !== value)].slice(0, 12) }))
+      },
 
       updateQuerySettings: (settings: Partial<QuerySettings>) => {
         // Filter out history_turns to prevent changes, always keep it as 0
@@ -67,7 +81,10 @@ const useQuerySettingsStoreBase = create<QuerySettingsState>()(
       }
     }),
     {
-      name: QUERY_SETTINGS_STORAGE_KEY,
+      name: key,
+      partialize: (state) => key === QUERY_SETTINGS_STORAGE_KEY
+        ? { querySettings: state.querySettings }
+        : { querySettings: state.querySettings, userPromptHistory: state.userPromptHistory },
       // Rollback safety: an envelope written by a NEWER client (version above
       // this build's) is neither hydrated nor overwritten — even when it
       // arrives mid-session from a newer tab. The extra divert extends
@@ -100,4 +117,4 @@ const useQuerySettingsStoreBase = create<QuerySettingsState>()(
   )
 )
 
-export const useQuerySettingsStore = createSelectors(useQuerySettingsStoreBase)
+export const useQuerySettingsStore = createSelectors(createQuerySettingsStore(QUERY_SETTINGS_STORAGE_KEY))

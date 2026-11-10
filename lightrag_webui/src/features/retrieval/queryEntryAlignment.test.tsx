@@ -14,7 +14,7 @@ import {
   type ProcessStateSnapshot
 } from '@/test/processState'
 import { useSettingsStore } from '@/stores/settings'
-import { defaultQuerySettings, useQuerySettingsStore } from '@/stores/querySettings'
+import { createQuerySettingsStore, defaultQuerySettings, useQuerySettingsStore, type QuerySettingsStore } from '@/stores/querySettings'
 import { useWebuiRetrievalHistoryStore } from '@/stores/webuiRetrievalHistory'
 import { useWorkspaceRetrievalHistoryStore } from '@/stores/workspaceRetrievalHistory'
 import type { QuerySettings } from '@/stores/querySettings'
@@ -38,7 +38,7 @@ import type { QueryInputError } from './queryInput'
 const requests: QueryRequest[] = []
 const dataRequests: QueryRequest[] = []
 let realApiModule: Record<string, unknown>
-let entries: { webui: ComponentType; workspace: ComponentType }
+let entries: { webui: ComponentType<{ settingsStore?: QuerySettingsStore }>; workspace: ComponentType }
 
 beforeAll(async () => {
   realApiModule = { ...(await import('@/api/lightrag')) }
@@ -172,6 +172,28 @@ const send = async (entry: EntryName, input: string): Promise<void> => {
 }
 
 describe('query entry input handling', () => {
+  test('a batch query sends its own settings and records its prompt only in that batch', async () => {
+    setQuerySettings({ top_k: 11, user_prompt: 'Original workspace prompt' })
+    const key = 'test::batch-query-request::alice::a'
+    try {
+      const settings = createQuerySettingsStore(key, { top_k: 73, user_prompt: 'Batch A prompt', stream: false })
+      const Entry = entries.webui
+      renderWithProviders(<Entry settingsStore={settings} />)
+      const user = userEvent.setup()
+      await user.type(composerInput(), 'Explain the batch evidence')
+      await user.keyboard('{Enter}')
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+      expect(requests).toHaveLength(1)
+      expect(requests[0].top_k).toBe(73)
+      expect(requests[0].user_prompt).toBe('Batch A prompt')
+      expect(settings.getState().userPromptHistory).toEqual(['Batch A prompt'])
+      expect(useSettingsStore.getState().userPromptHistory.includes('Batch A prompt')).toBe(false)
+      expect(useQuerySettingsStore.getState().querySettings.top_k).toBe(11)
+    } finally {
+      cleanup()
+      localStorage.removeItem(key)
+    }
+  })
   // A plain loop rather than `test.each`: Bun's table typings widen every
   // parameter to `unknown`, and the entry name is a key into `entries`.
   for (const entry of entryNames) {

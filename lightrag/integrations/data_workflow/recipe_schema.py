@@ -1,4 +1,4 @@
-"""Inspect editable types using the selected data-work-flow checkout, without a run."""
+"""Inspect types and prepare recipes with the selected checkout, without model calls."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ WORKFLOW = "difficulty_routed_qa"
 STAGES = ("scenario", "qa", "classification", "inspection")
 PARAMETER_FIELDS = (
     "questions_per_source",
-    "deduplicate_qa",
     "scenario_instructions",
     "classification_instructions",
     "inspection_instructions",
@@ -44,6 +43,7 @@ PROMPT_VARIABLES = {
         "payload",
     ),
 }
+
 
 SCHEMA_PROBE = r"""
 import json, sys, subprocess
@@ -88,16 +88,15 @@ try:
             raise ValueError('Unsupported workflow parameters: ' + ', '.join(sorted(set(parameters) - allowed)))
         for name in body['parameter_fields']:
             field = DifficultyRoutedQAParameters.model_fields[name]
-            TypeAdapter(field.rebuild_annotation()).validate_python(parameters[name], strict=True)
-        from data_studio.workflows.qa.difficulty_routed_qa import register_difficulty_routed_qa_builtins
-        from data_studio.operators.catalog import prompt_instance
-        register_difficulty_routed_qa_builtins()
-        for name in body['stages']:
-            task = TaskConfig.model_validate(parameters[name], context={'base_directory': body['base_directory']})
-            if task.model not in config.models:
-                raise ValueError('Stage references an unknown model profile: ' + name)
-            prompt_instance(task.prompt, name, task.parser, prompt_file=task.prompt_file)
-        print(json.dumps({'valid': True, 'issues': []}))
+            if name in parameters:
+                TypeAdapter(field.rebuild_annotation()).validate_python(parameters[name], strict=True)
+        from data_studio import prepare_job
+        from data_studio.config.topics import CategoryCatalog
+        plan = prepare_job(config, base_directory=body['base_directory'],
+            environ={model.key_name_of_api_key: 'offline-schema-validation' for model in config.models.values()})
+        if not isinstance(plan.parameters.topic_catalog, CategoryCatalog):
+            raise ValueError('Configure the current categories catalog in topic_catalog_file')
+        print(json.dumps({'valid': True, 'issues': [], 'validation_scope': 'workflow_preparation_without_model_requests'}))
 except ValidationError as error:
     issues = ['.'.join(str(p) for p in item['loc']) + ': ' + item['msg']
               for item in error.errors(include_input=False, include_context=False, include_url=False)]
@@ -136,7 +135,11 @@ def probe_schema(
             raise ValueError("Cannot load the installed difficulty_routed_qa schema")
         response = json.loads(result.stdout.strip().splitlines()[-1])
         if operation == "describe" and "schema_version" not in response:
-            raise ValueError("The installed workflow schema is incompatible")
+            issues = "; ".join(str(issue) for issue in response.get("issues", []))
+            raise ValueError(
+                "The installed workflow schema is incompatible"
+                + (": " + issues if issues else "")
+            )
         return response
     except (
         subprocess.TimeoutExpired,

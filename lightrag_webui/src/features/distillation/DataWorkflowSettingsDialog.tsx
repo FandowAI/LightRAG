@@ -240,16 +240,6 @@ export default function DataWorkflowSettingsDialog({
                       </select>
                     </label>
                   </div>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={values.deduplicate_qa}
-                      onChange={(event) =>
-                        setValues({ ...values, deduplicate_qa: event.target.checked })
-                      }
-                    />
-                    {label('deduplicate_qa')}
-                  </label>
                   {(
                     [
                       'scenario_instructions',
